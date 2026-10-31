@@ -1,0 +1,17 @@
+stateDiagram-v2
+  [*] --> raw
+  approved --> specced: decompose
+  approved --> parked: park
+  dispatched --> parked: park
+  dispatched --> rejected: reject
+  dispatched --> verified: verify
+  gated --> verified: close
+  gated --> dispatched: dispatch
+  gated --> specced: gate_fail
+  gated --> parked: park
+  raw --> parked: park
+  raw --> restated: restate
+  restated --> approved: approve
+  restated --> parked: park
+  specced --> gated: gate_pass
+  specced --> parked: park

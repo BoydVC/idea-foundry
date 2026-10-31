@@ -1,0 +1,21 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { edgesOfTransition } from "../src/domain.js";
+import { edgeKey, edgesFromTla, mermaid } from "../src/statechart.js";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const tla = readFileSync(join(root, "model", "foundry.tla"), "utf8");
+const chart = readFileSync(join(root, "model", "statechart.mmd"), "utf8");
+const fromModel = edgesFromTla(tla);
+const fromCode = edgesOfTransition();
+const modelKeys = new Set(fromModel.map(edgeKey));
+const codeKeys = new Set(fromCode.map(edgeKey));
+const missing = [...codeKeys].filter((key) => !modelKeys.has(key));
+const extra = [...modelKeys].filter((key) => !codeKeys.has(key));
+const rendered = mermaid(fromModel);
+if (missing.length > 0 || extra.length > 0 || rendered !== chart) {
+  process.stderr.write(`${JSON.stringify({ missing, extra, rendered }, null, 2)}\n`);
+  process.exit(1);
+}
+process.stdout.write(`statechart edges ${codeKeys.size}\n`);
