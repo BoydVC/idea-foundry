@@ -19,7 +19,7 @@ Run this skill if the diff touches any of these files:
 - `model/foundry.tla`
 - `model/foundry.cfg`
 
-The model was last confirmed against commit `SYNC_COMMIT`. If those files changed after that commit, the model may be stale. Move `SYNC_COMMIT` forward only after TLC passes and you have read the actions against the new code.
+The model was last confirmed against commit `6b32e44d967cce0a78ebd13b6bdb6d6974627b83`. If those files changed after that commit, the model may be stale. Move `SYNC_COMMIT` forward only after TLC passes and you have read the actions against the new code.
 
 ## Run
 
