@@ -61,4 +61,12 @@ if (lost.status === 0 || !lost.output.includes("CASNoLostUpdate is violated") ||
   process.exit(1);
 }
 
+const undone = run("foundry_undo");
+const undoPath = shortestPath(undone.output, "VerifiedIsFinal");
+if (undoPath) process.stdout.write(`${undoPath}\n`);
+if (undone.status === 0 || !undone.output.includes("VerifiedIsFinal is violated") || undoPath === null) {
+  process.stderr.write("Undo config must violate VerifiedIsFinal.\n");
+  process.exit(1);
+}
+
 process.exit(0);

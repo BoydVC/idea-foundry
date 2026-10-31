@@ -108,12 +108,11 @@ describe("foundry flow", () => {
     expect(blocked.ok).toBe(false);
     if (blocked.ok) return;
     expect(blocked.error).toBe("stack_order");
-    const offline = () => ({ ok: false as const, warning: "GitHub API was unreachable. Using the report line." });
     const published = ingest(
       store,
       bottom.id,
       ["---", "verdict: verified", "draft: false", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "note"].join("\n"),
-      { probe: offline },
+      { probe: () => ({ ok: true, draft: false }) },
       false,
     );
     expect(published.ok).toBe(false);
@@ -124,20 +123,21 @@ describe("foundry flow", () => {
       store,
       bottom.id,
       ["---", "verdict: verified", "draft: true", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "Synthetic note."].join("\n"),
-      { probe: offline },
+      { probe: () => ({ ok: true, draft: true }) },
       false,
     );
     expect(verified.ok).toBe(true);
-    if (verified.ok) expect(verified.warning).toMatch(/report line/);
+    if (verified.ok) expect(verified.warning).toBeUndefined();
     expect(store.findSpec(bottom.id)?.state).toBe("verified");
     const repeat = ingest(
       store,
       bottom.id,
       ["---", "verdict: verified", "draft: true", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "Synthetic note."].join("\n"),
-      { probe: offline },
+      { probe: () => ({ ok: true, draft: false }) },
       false,
     );
     expect(repeat.ok).toBe(true);
+    if (repeat.ok) expect(repeat.idempotent).toBe(true);
     expect(store.findSpec(bottom.id)?.version).toBe(store.load().specs.find((spec) => spec.id === bottom.id)?.version);
   });
 
@@ -186,23 +186,27 @@ describe("foundry flow", () => {
       store,
       bottom.id,
       report(false),
-      { probe: () => ({ ok: false, warning: "GitHub API was unreachable. Using the report line." }) },
+      { probe: () => ({ ok: false, warning: "GitHub API was unreachable. Using the report line.", trustReport: false, code: "offline" }) },
       false,
     );
     expect(offlineFalse.ok).toBe(false);
-    if (!offlineFalse.ok) expect(offlineFalse.warning).toMatch(/unreachable/);
+    if (!offlineFalse.ok) {
+      expect(offlineFalse.error).toBe("github_unconfirmed");
+      expect(offlineFalse.confirmation).toBe("unconfirmed");
+    }
     expect(store.findSpec(bottom.id)?.state).toBe("dispatched");
 
     const offlineTrue = ingest(
       store,
       bottom.id,
       report(true),
-      { probe: () => ({ ok: false, warning: "GitHub API was unreachable. Using the report line." }) },
+      { probe: () => ({ ok: false, warning: "GitHub API was unreachable. Using the report line.", trustReport: false, code: "offline" }) },
       false,
     );
-    expect(offlineTrue.ok).toBe(true);
-    if (offlineTrue.ok) expect(offlineTrue.warning).toMatch(/unreachable/);
-    expect(store.findSpec(bottom.id)?.state).toBe("verified");
+    expect(offlineTrue.ok).toBe(false);
+    if (!offlineTrue.ok) expect(offlineTrue.error).toBe("github_unconfirmed");
+    expect(store.findSpec(bottom.id)?.state).toBe("dispatched");
+    expect(ingest(store, bottom.id, report(true), { probe: () => ({ ok: true, draft: true }) }, false).ok).toBe(true);
 
     expect(dispatch(store, upper.id, false).ok).toBe(true);
     const apiWins = ingest(store, upper.id, report(false), { probe: () => ({ ok: true, draft: true }) }, false);
@@ -210,7 +214,7 @@ describe("foundry flow", () => {
     if (apiWins.ok) expect(apiWins.warning).toBeUndefined();
     expect(store.findSpec(upper.id)?.state).toBe("verified");
 
-    const again = ingest(store, upper.id, report(true), { probe: () => ({ ok: true, draft: false }) }, false);
+    const again = ingest(store, upper.id, report(true), { probe: () => ({ ok: true, draft: false }), unverify: true }, false);
     expect(again.ok).toBe(true);
     if (again.ok) expect((again.data as { unverified?: boolean }).unverified).toBe(true);
     expect(store.findSpec(upper.id)?.state).toBe("dispatched");
@@ -241,17 +245,17 @@ describe("foundry flow", () => {
     const top = family[family.length - 1];
     if (!bottom || !top || bottom.id === top.id) throw new Error("missing specs");
 
-    const blocked = ingest(store, bottom.id, report, { probe: () => ({ ok: true, draft: false }) }, false);
+    const blocked = ingest(store, bottom.id, report, { probe: () => ({ ok: true, draft: false }), unverify: true }, false);
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) expect(blocked.error).toBe("stack_order");
     expect(store.findSpec(bottom.id)?.state).toBe("verified");
 
-    const preview = ingest(store, top.id, report, { probe: () => ({ ok: true, draft: true, closed: true }) }, true);
+    const preview = ingest(store, top.id, report, { probe: () => ({ ok: true, draft: true, closed: true }), unverify: true }, true);
     expect(preview.ok).toBe(true);
     if (preview.ok) expect(preview.dryRun).toBe(true);
     expect(store.findSpec(top.id)?.state).toBe("verified");
 
-    const closed = ingest(store, top.id, report, { probe: () => ({ ok: true, draft: true, closed: true }) }, false);
+    const closed = ingest(store, top.id, report, { probe: () => ({ ok: true, draft: true, closed: true }), unverify: true }, false);
     expect(closed.ok).toBe(true);
     if (closed.ok) expect((closed.data as { reason?: string }).reason).toMatch(/closed/);
     expect(store.findSpec(top.id)?.state).toBe("dispatched");
@@ -261,16 +265,16 @@ describe("foundry flow", () => {
       store,
       bottom.id,
       report.replace("draft: true", "draft: false"),
-      { probe: () => ({ ok: false, warning: "GitHub API was unreachable. Using the report line." }) },
+      { probe: () => ({ ok: false, warning: "GitHub API was unreachable.", trustReport: false, code: "offline" }), unverify: true },
       false,
     );
     expect(offline.ok).toBe(false);
-    if (!offline.ok) expect(offline.error).toBe("not_draft");
+    if (!offline.ok) expect(offline.error).toBe("github_unconfirmed");
     expect(store.findSpec(bottom.id)?.state).toBe("verified");
 
     const rest = specs().filter((spec) => spec.state === "verified").sort((a, b) => b.index - a.index);
     for (const spec of rest) {
-      const dropped = ingest(store, spec.id, report, { probe: () => ({ ok: true, draft: false }) }, false);
+      const dropped = ingest(store, spec.id, report, { probe: () => ({ ok: true, draft: false }), unverify: true }, false);
       expect(dropped.ok).toBe(true);
       expect(store.findSpec(spec.id)?.state).toBe("dispatched");
     }

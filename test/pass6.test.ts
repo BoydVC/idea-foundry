@@ -55,8 +55,12 @@ describe("pass 6", () => {
       { pr, probe: () => interpretGithubProbe({ status: null, stdout: "", stderr: "dial tcp: lookup api.github.com", errorCode: "ENOTFOUND" }) },
       false,
     );
-    expect(offline.ok).toBe(true);
-    expect(store.findSpec(specId)?.state).toBe("verified");
+    expect(offline.ok).toBe(false);
+    if (!offline.ok) {
+      expect(offline.error).toBe("github_unconfirmed");
+      expect(offline.confirmation).toBe("unconfirmed");
+    }
+    expect(store.findSpec(specId)?.state).toBe("dispatched");
   });
 
   test("a --pr that disagrees with the report is a mismatch", () => {

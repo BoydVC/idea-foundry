@@ -69,6 +69,7 @@ test("add an idea and verify the bottom of its stack", async ({ page }) => {
     }
   }
   await expect(page.getByTestId("detail").locator(".mono").first()).toContainText("i-0006 · verified");
+  await expect(page.locator(".column").filter({ has: page.getByRole("heading", { name: /^verified\b/ }) }).getByTestId("idea-i-0006")).toBeVisible();
 
   const merge = await page.request.post("/api/merge");
   expect(merge.status()).toBe(403);

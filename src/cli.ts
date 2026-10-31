@@ -16,12 +16,22 @@ type Flags = {
   draft?: boolean;
   allowDuplicate: boolean;
   fresh: boolean;
+  recheck: boolean;
+  unverify: boolean;
   version?: number;
   help: boolean;
 };
 
 function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
-  const flags: Flags = { dryRun: false, data: process.env.FOUNDRY_DATA ?? "data", help: false, allowDuplicate: false, fresh: false };
+  const flags: Flags = {
+    dryRun: false,
+    data: process.env.FOUNDRY_DATA ?? "data",
+    help: false,
+    allowDuplicate: false,
+    fresh: false,
+    recheck: false,
+    unverify: false,
+  };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -30,6 +40,8 @@ function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
     else if (arg === "--draft") flags.draft = true;
     else if (arg === "--allow-duplicate") flags.allowDuplicate = true;
     else if (arg === "--fresh") flags.fresh = true;
+    else if (arg === "--recheck") flags.recheck = true;
+    else if (arg === "--unverify") flags.unverify = true;
     else if (arg === "--no-draft") flags.draft = false;
     else if (arg === "--version" || arg === "--record-version") {
       const value = argv[i + 1];
@@ -140,7 +152,13 @@ export async function main(argv: string[]): Promise<number> {
           break;
         }
         const text = store.readText(flags.report);
-        result = ingest(store, pos[0] ?? "", text, { draft: flags.draft, pr: flags.pr, expectedVersion: flags.version }, flags.dryRun);
+        result = ingest(
+          store,
+          pos[0] ?? "",
+          text,
+          { draft: flags.draft, pr: flags.pr, expectedVersion: flags.version, unverify: flags.unverify },
+          flags.dryRun,
+        );
         break;
       }
       case "park":

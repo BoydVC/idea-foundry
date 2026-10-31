@@ -1,8 +1,8 @@
 ------------------------------ MODULE foundry ------------------------------
 EXTENDS Integers
 
-CONSTANT SkipGate, AllowMerge, LoseUpdate
-ASSUME SkipGate \in BOOLEAN /\ AllowMerge \in BOOLEAN /\ LoseUpdate \in BOOLEAN
+CONSTANT SkipGate, AllowMerge, LoseUpdate, UndoVerify
+ASSUME SkipGate \in BOOLEAN /\ AllowMerge \in BOOLEAN /\ LoseUpdate \in BOOLEAN /\ UndoVerify \in BOOLEAN
 
 VARIABLES idea, s1, s2, draft1, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone
 
@@ -127,6 +127,14 @@ Redraft2 ==
   /\ draft2 = FALSE
   /\ draft2' = TRUE
   /\ UNCHANGED <<idea, s1, s2, draft1, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
+
+\* event: reject
+RejectIdea ==
+  /\ idea = "gated"
+  /\ \/ s1 = "rejected"
+     \/ s2 = "rejected"
+  /\ idea' = "rejected"
+  /\ UNCHANGED <<s1, s2, draft1, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
 
 \* event: reject
 Reject1 ==
@@ -289,6 +297,13 @@ MergeSpec ==
   /\ s1' = "merged"
   /\ UNCHANGED <<idea, s2, draft1, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
 
+\* Not a chart edge. Enabled only when UndoVerify is true.
+UndoVerifiedDraft ==
+  /\ UndoVerify
+  /\ s1 = "verified"
+  /\ draft1' = FALSE
+  /\ UNCHANGED <<idea, s1, s2, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
+
 \* Not a chart edge. Enabled only when LoseUpdate is true.
 DoubleCommit ==
   /\ LoseUpdate
@@ -317,6 +332,7 @@ Next ==
   \/ Unverify2
   \/ Redraft1
   \/ Redraft2
+  \/ RejectIdea
   \/ Reject1
   \/ Reject2
   \/ GateFail1
@@ -340,6 +356,7 @@ Next ==
   \/ SkipGateDispatch
   \/ MergeSpec
   \/ DoubleCommit
+  \/ UndoVerifiedDraft
 
 Spec == Init /\ [][Next]_vars
 
@@ -372,6 +389,10 @@ NoMergeState ==
   /\ s2 # "merged"
 
 VerifiedImpliesDraftPR ==
+  /\ (s1 = "verified" => draft1)
+  /\ (s2 = "verified" => draft2)
+
+VerifiedIsFinal ==
   /\ (s1 = "verified" => draft1)
   /\ (s2 = "verified" => draft2)
 

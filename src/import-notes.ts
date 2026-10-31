@@ -27,6 +27,11 @@ export function draftOf(title: string, note: string): Restatement {
 }
 
 const MAX_NOTE_CHARS = 4_000;
+const MAX_IMPORT_CHARS = 10_000_000;
+
+export function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
 
 function stringField(record: Record<string, unknown>, keys: readonly string[], label: string): string {
   for (const key of keys) {
@@ -144,9 +149,9 @@ function bookmarkRow(row: unknown, index: number): { ok: true; value: XBookmark 
 }
 
 export function parseBookmarkExport(text: string): { rows: (XBookmark & { index: number })[]; invalid: InvalidBookmark[] } {
-  const trimmed = text.trim();
+  const trimmed = stripBom(text).trim();
   if (trimmed.length === 0) return { rows: [], invalid: [] };
-  if (trimmed.length > 256_000) {
+  if (trimmed.length > MAX_IMPORT_CHARS) {
     throw new DomainError("bad_import", "The import file is too large.", "Split the file and import the pieces.");
   }
   let payload: unknown;
@@ -174,9 +179,9 @@ export function parseBookmarkExport(text: string): { rows: (XBookmark & { index:
 }
 
 export function parseImportFile(text: string): ImportNote[] {
-  const trimmed = text.trim();
+  const trimmed = stripBom(text).trim();
   if (trimmed.length === 0) return [];
-  if (trimmed.length > 256_000) {
+  if (trimmed.length > MAX_IMPORT_CHARS) {
     throw new DomainError("bad_import", "The import file is too large.", "Split the file and import the pieces.");
   }
   const raw = trimmed.startsWith("{") || trimmed.startsWith("[") ? jsonOrMarkdown(trimmed) : fromMarkdown(trimmed);

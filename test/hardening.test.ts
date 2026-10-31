@@ -271,7 +271,7 @@ describe("hardening", () => {
       report(true),
       {
         probe: () => {
-          const dropped = ingest(store, bottom.id, report(false), { probe: () => ({ ok: true, draft: false }) }, false);
+          const dropped = ingest(store, bottom.id, report(false), { probe: () => ({ ok: true, draft: false }), unverify: true }, false);
           if (!dropped.ok) throw new Error(JSON.stringify(dropped));
           return { ok: true, draft: true };
         },
@@ -304,7 +304,7 @@ describe("hardening", () => {
     expect(family.length).toBeGreaterThanOrEqual(3);
     const middle = family[1];
     if (!middle) throw new Error("missing middle");
-    const blocked = ingest(store, middle.id, report(false, prFor(middle.index)), { probe: () => ({ ok: true, draft: false }) }, false);
+    const blocked = ingest(store, middle.id, report(false, prFor(middle.index)), { probe: () => ({ ok: true, draft: false }), unverify: true }, false);
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) expect(blocked.error).toBe("stack_order");
     expect(store.findSpec(middle.id)?.state).toBe("verified");

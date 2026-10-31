@@ -8,7 +8,7 @@ Idea Foundry turns one raw idea into an ordered stack of small specs, runs the s
 - JDK 21 on `PATH` as `java`, for `npm run tlc` and `npm run tlc:mutant`. When `java` is missing outside CI, those commands print `SKIP: Java is not on PATH` and exit 0. CI treats a missing JDK as an error.
 - `tesseract` and `ffmpeg`, for `npm run pii` (it OCRs `screenshots/demo.gif`) and for `scripts/record-demo.ts` (it rebuilds that gif from the recorded video). A missing tool exits with a JSON error that names the tool and these prerequisites.
 
-`foundry dispatch` reads open draft pull requests for the target repo and refuses with status 409 when that count is above 10. Set `FOUNDRY_OPEN_DRAFTS` only in tests and the local demo. An unreachable GitHub API prints a warning and still dispatches. Ingest treats HTTP 404, 401, and 403 as a refusal and does not verify from the report. Only a real network failure falls back to the report line. The demo and Playwright set `FOUNDRY_GITHUB_DRAFT=offline` so a synthetic pull request can still be ingested.
+`foundry dispatch` reads open draft pull requests for the target repo and refuses with status 409 when that count is above 10. Set `FOUNDRY_OPEN_DRAFTS` only in tests and the local demo. An unreachable GitHub API prints a warning and still dispatches. Ingest does not verify unless GitHub confirms the pull request is a draft. A missing `gh`, a timeout, a network failure, or a non-JSON body leaves the spec dispatched with `github_unconfirmed`. `FOUNDRY_GITHUB_DRAFT=offline` is test mode, labeled in the output, and is the only path that uses the report line. Re-ingest of a verified spec is a no-op. Pass `--unverify` to leave verified after GitHub confirms it is closed or no longer a draft. HTTP 403 is returned as 403.
 
 ## Run the pipeline
 
@@ -72,4 +72,4 @@ npm run pii
 npm run test:e2e
 ```
 
-`npm run tlc:mutant` passes only when `foundry_skip_gate.cfg` violates `DispatchRequiresGate`, `foundry_merge.cfg` violates `NoMergeState`, and `foundry_lost.cfg` violates `CASNoLostUpdate`. All three configs use `model/foundry.tla`.
+`npm run tlc:mutant` passes only when `foundry_skip_gate.cfg` violates `DispatchRequiresGate`, `foundry_merge.cfg` violates `NoMergeState`, `foundry_lost.cfg` violates `CASNoLostUpdate`, and `foundry_undo.cfg` violates `VerifiedIsFinal`. All four configs use `model/foundry.tla`.

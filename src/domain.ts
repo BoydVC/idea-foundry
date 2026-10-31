@@ -242,12 +242,12 @@ export function transition(state: Phase, event: EventName): Phase {
     case "reject":
       switch (state) {
         case "dispatched":
+        case "gated":
           return "rejected";
         case "raw":
         case "restated":
         case "approved":
         case "specced":
-        case "gated":
         case "verified":
         case "rejected":
         case "parked":

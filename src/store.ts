@@ -296,6 +296,15 @@ export class Store {
         );
       }
     }
+    for (const spec of after.specs) {
+      const prev = before.specs.find((item) => item.id === spec.id);
+      if (!prev || prev.version !== spec.version) {
+        appendFileSync(
+          join(this.root, "events.jsonl"),
+          `${JSON.stringify({ at: spec.updatedAt, id: spec.id, version: spec.version, state: spec.state })}\n`,
+        );
+      }
+    }
     for (const lesson of after.lessons) {
       const prev = before.lessons.find((item) => item.id === lesson.id);
       if (!prev || prev.version !== lesson.version) {

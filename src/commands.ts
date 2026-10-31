@@ -13,6 +13,7 @@ import {
   normalizeTitle,
   parseIdea,
   parseLesson,
+  parseTitle,
   parseSpec,
   promote,
   prUrl,
@@ -49,6 +50,7 @@ export type CommandErr = {
   message: string;
   next: string;
   warning?: string;
+  confirmation?: "unconfirmed";
 };
 
 export type CommandResult = CommandOk | CommandErr;
@@ -63,8 +65,15 @@ function ok(data: unknown, extra?: { dryRun?: boolean; idempotent?: boolean; war
   };
 }
 
-function fail(status: number, error: string, message: string, next: string, warning?: string): CommandErr {
-  return { ok: false, status, error, message, next, warning };
+function fail(
+  status: number,
+  error: string,
+  message: string,
+  next: string,
+  warning?: string,
+  confirmation?: "unconfirmed",
+): CommandErr {
+  return { ok: false, status, error, message, next, warning, confirmation };
 }
 
 function stale(actual: number, expected: number | undefined): CommandErr | null {
@@ -188,9 +197,10 @@ function recordFindings(snap: Snapshot, findings: readonly Finding[], now: strin
   return { ...snap, findingCounts: counts, lessons, nextLesson };
 }
 
-function duplicateTitle(ideas: readonly { title: string }[], title: string): boolean {
+function duplicateTitle(ideas: readonly { id: string; title: string }[], title: string): { id: string; title: string } | undefined {
   const key = normalizeTitle(title);
-  return key.length > 0 && ideas.some((idea) => normalizeTitle(idea.title) === key);
+  if (key.length === 0) return undefined;
+  return ideas.find((idea) => normalizeTitle(idea.title) === key);
 }
 
 export function createIdea(store: Store, title: string, dryRun: boolean, options?: { allowDuplicate?: boolean }): CommandResult {
@@ -208,8 +218,9 @@ export function createIdea(store: Store, title: string, dryRun: boolean, options
       updatedAt: store.now(),
     });
     clean = preview.title;
-    if (duplicateTitle(snap.ideas, clean) && !options?.allowDuplicate) {
-      warning = `An idea already uses the title "${clean}". Pass --allow-duplicate to hide this warning.`;
+    const existing = duplicateTitle(snap.ideas, clean);
+    if (existing && !options?.allowDuplicate) {
+      warning = `Idea ${existing.id} already uses the title "${existing.title}". Pass --allow-duplicate to hide this warning.`;
     }
     if (dryRun) return ok(preview, { dryRun: true, warning });
   } catch (error) {
@@ -659,10 +670,29 @@ function githubStatus(warning: string | undefined): number {
   return warning !== undefined && /rate limit/i.test(warning) ? 429 : 502;
 }
 
-function withheldResult(decided: { warning?: string; message: string; next: string; code?: string }): CommandErr {
+function withheldResult(decided: { warning?: string; message: string; next: string; code?: string; httpStatus?: number }): CommandErr {
   if (decided.code === "pr_not_found") return fail(404, "pr_not_found", decided.message, decided.next, decided.warning);
-  if (decided.code === "probe_auth") return fail(401, "probe_auth", decided.message, decided.next, decided.warning);
+  if (decided.code === "probe_auth") {
+    return fail(decided.httpStatus === 403 ? 403 : 401, "probe_auth", decided.message, decided.next, decided.warning);
+  }
+  if (decided.code === "rate_limit" || /rate limit/i.test(decided.warning ?? "")) {
+    return fail(429, "github_unavailable", decided.message, decided.next, decided.warning);
+  }
+  if (decided.code === "offline" || decided.code === "api_failure") {
+    return fail(503, "github_unconfirmed", decided.message, decided.next, decided.warning, "unconfirmed");
+  }
   return fail(githubStatus(decided.warning), "github_unavailable", decided.message, decided.next, decided.warning);
+}
+
+function rolledIdea(idea: Idea, specs: readonly Spec[], now: string): Idea {
+  if (idea.state !== "gated") return idea;
+  if (specs.some((spec) => spec.state === "rejected")) {
+    return parseIdea(bump(idea, { state: transition(idea.state, "reject"), reason: "A spec was rejected." }, now));
+  }
+  if (specs.length > 0 && specs.every((spec) => spec.state === "verified")) {
+    return parseIdea(bump(idea, { state: transition(idea.state, "close"), draft: true }, now));
+  }
+  return idea;
 }
 
 export function rejectionKey(reason: string): string {
@@ -687,7 +717,7 @@ export function ingest(
   store: Store,
   id: string,
   reportText: string,
-  overrides: { draft?: boolean; pr?: string; probe?: DraftProbe; expectedVersion?: number },
+  overrides: { draft?: boolean; pr?: string; probe?: DraftProbe; expectedVersion?: number; unverify?: boolean },
   dryRun: boolean,
 ): CommandResult {
   const spec = store.findSpec(id);
@@ -710,18 +740,30 @@ export function ingest(
     );
   }
   const prRaw = overrides.pr ?? report.pr;
-  if (spec.state === "verified") {
-    if (typeof prRaw === "string" && prRaw.length > 0 && prRaw !== spec.prUrl) {
+  if (spec.state === "verified" || spec.state === "rejected") {
+    if (spec.state === "verified" && typeof prRaw === "string" && prRaw.length > 0 && prRaw !== spec.prUrl) {
       return fail(422, "pr_mismatch", `This spec is verified at ${spec.prUrl}.`, "Re-ingest that pull request, not a different URL.");
+    }
+    const sameVerdict = spec.state === "verified" ? report.verdict === "verified" : report.verdict === "rejected";
+    const sameDraft = spec.state !== "verified" || reportDraft === true;
+    if (!overrides.unverify && sameVerdict && sameDraft) {
+      return ok(spec, { idempotent: true, dryRun });
+    }
+    if (!overrides.unverify || spec.state !== "verified") {
+      return fail(
+        409,
+        "already_final",
+        `Spec ${spec.id} is ${spec.state}. Ingest will not change it.`,
+        spec.state === "verified"
+          ? "Pass --unverify to leave verified after GitHub confirms the pull request is not a draft."
+          : "This rejection is final. Start a new spec to try again.",
+      );
     }
     const decided = resolveDraftStatus(reportDraft, spec.prUrl, overrides.probe ?? lookupGithubDraft);
     if (decided.withheld) return withheldResult(decided);
     if (decided.draft) return ok(spec, { idempotent: true, dryRun, warning: decided.warning });
     if (decided.warning) return fail(422, "not_draft", decided.message, decided.next, decided.warning);
     return unverify(store, spec, decided, dryRun);
-  }
-  if (spec.state === "rejected" && report.verdict === "rejected") {
-    return ok(spec, { idempotent: true, dryRun });
   }
   if (spec.state !== "dispatched") {
     return fail(422, "illegal_transition", `Cannot ingest from ${spec.state}.`, "Run `foundry dispatch <spec-id>` first.");
@@ -764,14 +806,8 @@ export function ingest(
             ),
           );
     const idea = snap.ideas.find((item) => item.id === spec.ideaId);
-    let nextIdea = idea;
-    if (report.verdict === "verified" && idea && (idea.state === "gated" || idea.state === "specced")) {
-      const after = siblings.map((item) => (item.id === spec.id ? nextSpec : item));
-      const allVerified = after.every((item) => item.state === "verified");
-      if (allVerified && idea.state === "gated") {
-        nextIdea = parseIdea(bump(idea, { state: transition(idea.state, "close"), draft: true }, now));
-      }
-    }
+    const previewFamily = siblings.map((item) => (item.id === spec.id ? nextSpec : item));
+    const nextIdea = idea ? rolledIdea(idea, previewFamily, now) : idea;
     if (dryRun) return ok({ spec: nextSpec, idea: nextIdea }, { dryRun: true, warning: decided.warning });
     const ideaNow = freshSnap.ideas.find((item) => item.id === freshSpec.ideaId);
     const expectIdeas = nextIdea && ideaNow && nextIdea.version !== ideaNow.version ? [{ id: ideaNow.id, version: ideaNow.version }] : [];
@@ -791,12 +827,10 @@ export function ingest(
           : parseSpec(bump(fresh, { state: transition(fresh.state, "verify"), prUrl: pr, draft: true }, store.now()));
       let ideas = current.ideas;
       const currentIdea = ideas.find((item) => item.id === fresh.ideaId);
-      if (report.verdict === "verified" && currentIdea?.state === "gated") {
+      if (currentIdea) {
         const family = current.specs.map((item) => (item.id === written.id ? written : item)).filter((item) => item.stackId === fresh.stackId);
-        if (family.every((item) => item.state === "verified")) {
-          const closed = parseIdea(bump(currentIdea, { state: transition(currentIdea.state, "close"), draft: true }, store.now()));
-          ideas = ideas.map((item) => (item.id === closed.id ? closed : item));
-        }
+        const rolled = rolledIdea(currentIdea, family, store.now());
+        if (rolled !== currentIdea) ideas = ideas.map((item) => (item.id === rolled.id ? rolled : item));
       }
       const base = { ...current, ideas, specs: current.specs.map((item) => (item.id === written.id ? written : item)) };
       if (written.state !== "rejected") return base;
@@ -924,30 +958,55 @@ export function importBookmarks(store: Store, text: string, planner: Planner, dr
     batchText.add(key);
     fresh.push(row);
   }
-  skipped.sort((a, b) => a.index - b.index);
-  if (dryRun) return ok({ count: fresh.length, skipped }, { dryRun: true });
-  const saved: unknown[] = [];
+  const ready: { id: string; title: string; draft: ReturnType<typeof draftOf> }[] = [];
   for (const row of fresh) {
-    let title = row.text;
-    if (title.length > 200) title = title.slice(0, 200).trimEnd();
-    const made = createIdea(store, title, false, { allowDuplicate: true });
-    if (!made.ok) {
-      skipped.push({ index: 0, id: row.id, reason: "invalid-row", message: made.message, next: made.next });
-      continue;
+    const clipped = row.text.length > 200 ? row.text.slice(0, 200).trimEnd() : row.text;
+    try {
+      const title = parseTitle(clipped);
+      ready.push({ id: row.id, title, draft: draftOf(title, row.text) });
+    } catch (error) {
+      if (error instanceof DomainError) {
+        skipped.push({ index: row.index, id: row.id, reason: "invalid-row", message: error.message, next: error.next });
+        continue;
+      }
+      throw error;
     }
-    const idea = made.data as Idea;
-    const drafted = draftOf(title, row.text);
-    const restated = restate(store, idea.id, planner, false, idea.version, drafted);
-    if (!restated.ok) return restated;
-    const remembered = store.transact({ ideas: [], specs: [] }, (current) => {
-      if (current.seenBookmarkIds.includes(row.id)) return current;
-      return { ...current, seenBookmarkIds: [...current.seenBookmarkIds, row.id] };
-    });
-    if (!remembered.ok) return remembered;
-    saved.push(restated.data);
-    titles.add(normalizeTitle(title));
   }
-  return ok({ count: saved.length, skipped, ideas: saved }, { idempotent: saved.length === 0 });
+  skipped.sort((a, b) => a.index - b.index);
+  if (dryRun) return ok({ count: ready.length, skipped, invalid: parsed.invalid.length }, { dryRun: true });
+  if (ready.length === 0) {
+    const data = { count: 0, skipped, invalid: parsed.invalid.length, ideas: [] as Idea[] };
+    if (parsed.invalid.length === 0) return ok(data, { idempotent: true });
+    return ok(data);
+  }
+  const saved = store.transact({ ideas: [], specs: [] }, (current) => {
+    let nextIdea = current.nextIdea;
+    const ideas = [...current.ideas];
+    const ids = [...current.seenBookmarkIds];
+    const now = store.now();
+    for (const item of ready) {
+      ideas.push(
+        parseIdea({
+          id: ideaIdFromCounter(nextIdea),
+          version: 1,
+          title: item.title,
+          labels: [],
+          state: "restated",
+          restatement: item.draft.restatement,
+          questions: [...item.draft.questions],
+          createdAt: now,
+          updatedAt: now,
+        }),
+      );
+      nextIdea += 1;
+      if (!ids.includes(item.id)) ids.push(item.id);
+    }
+    return { ...current, nextIdea, ideas, seenBookmarkIds: ids };
+  });
+  if (!saved.ok) return saved;
+  const ideas = saved.value.ideas.slice(-ready.length);
+  const data = { count: ideas.length, skipped, invalid: parsed.invalid.length, ideas };
+  return ok(data);
 }
 
 function proposalBody(lesson: { key: string; detail: string; promotedTo: string }): string {

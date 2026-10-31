@@ -25,6 +25,7 @@ describe("transition", () => {
       "gated dispatch dispatched",
       "gated gate_fail specced",
       "gated park parked",
+      "gated reject rejected",
       "raw park parked",
       "raw restate restated",
       "restated approve approved",
