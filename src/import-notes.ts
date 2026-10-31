@@ -26,14 +26,30 @@ export function draftOf(title: string, note: string): Restatement {
   };
 }
 
+const MAX_NOTE_CHARS = 4_000;
+
+function stringField(record: Record<string, unknown>, keys: readonly string[], label: string): string {
+  for (const key of keys) {
+    if (!(key in record) || record[key] === undefined) continue;
+    const value = record[key];
+    if (typeof value !== "string") {
+      throw new DomainError("bad_import", `The ${label} field must be a string.`, "Use strings for the title and the note.");
+    }
+    return value;
+  }
+  return "";
+}
+
 function noteFromRow(row: unknown): { title: string; note: string } {
-  if (!row || typeof row !== "object") {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
     throw new DomainError("bad_import", "Each note must be an object with a title.", "Use {\"title\",\"note\"} or a markdown heading.");
   }
   const record = row as Record<string, unknown>;
-  const title = typeof record.title === "string" ? record.title : typeof record.name === "string" ? record.name : "";
-  const note =
-    typeof record.note === "string" ? record.note : typeof record.text === "string" ? record.text : typeof record.body === "string" ? record.body : "";
+  const title = stringField(record, ["title", "name"], "title");
+  const note = stringField(record, ["note", "text", "body"], "note");
+  if (note.length > MAX_NOTE_CHARS) {
+    throw new DomainError("bad_import", "A note is too large.", "Keep each note under 4000 characters.");
+  }
   return { title, note };
 }
 
@@ -44,25 +60,26 @@ function fromJson(text: string): { title: string; note: string }[] {
   } catch {
     throw new DomainError("bad_import", "The import file is not valid JSON.", "Fix the JSON, or use markdown headings.");
   }
-  const rows = Array.isArray(parsed)
-    ? parsed
-    : parsed && typeof parsed === "object"
-      ? [
-          ...((parsed as { notes?: unknown }).notes && Array.isArray((parsed as { notes?: unknown }).notes)
-            ? ((parsed as { notes: unknown[] }).notes)
-            : []),
-          ...((parsed as { bookmarks?: unknown }).bookmarks && Array.isArray((parsed as { bookmarks?: unknown }).bookmarks)
-            ? ((parsed as { bookmarks: unknown[] }).bookmarks)
-            : []),
-        ]
-      : null;
-  if (!rows) {
+  if (Array.isArray(parsed)) return parsed.map(noteFromRow);
+  if (!parsed || typeof parsed !== "object") {
     throw new DomainError("bad_import", "JSON import needs a notes or bookmarks list.", "Use {\"bookmarks\":[{\"title\",\"note\"}]}.");
   }
-  if (!Array.isArray(parsed) && rows.length === 0 && !("notes" in (parsed as object)) && !("bookmarks" in (parsed as object))) {
+  const record = parsed as Record<string, unknown>;
+  const notes = listField(record, "notes");
+  const bookmarks = listField(record, "bookmarks");
+  if (notes === null && bookmarks === null) {
     throw new DomainError("bad_import", "JSON import needs a notes or bookmarks list.", "Use {\"bookmarks\":[{\"title\",\"note\"}]}.");
   }
-  return rows.map(noteFromRow);
+  return [...(notes ?? []), ...(bookmarks ?? [])].map(noteFromRow);
+}
+
+function listField(record: Record<string, unknown>, key: "notes" | "bookmarks"): unknown[] | null {
+  if (!(key in record)) return null;
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    throw new DomainError("bad_import", `The ${key} field must be a list.`, `Use {"${key}":[{"title","note"}]}.`);
+  }
+  return value;
 }
 
 function fromMarkdown(text: string): { title: string; note: string }[] {
@@ -70,7 +87,9 @@ function fromMarkdown(text: string): { title: string; note: string }[] {
     throw new DomainError("bad_import", "Markdown import needs a # heading for each note.", "Start each note with # and a title.");
   }
   const notes: { title: string; note: string }[] = [];
-  for (const chunk of text.split(/^# /m)) {
+  const chunks = text.split(/^# /m);
+  const bodies = /^# /.test(text) ? chunks : chunks.slice(1);
+  for (const chunk of bodies) {
     if (chunk.trim() === "") continue;
     const [first, ...rest] = chunk.split(/\n/);
     notes.push({ title: (first ?? "").trim(), note: rest.join("\n").trim() });
@@ -81,6 +100,19 @@ function fromMarkdown(text: string): { title: string; note: string }[] {
 export function parseImportFile(text: string): ImportNote[] {
   const trimmed = text.trim();
   if (trimmed.length === 0) return [];
-  const raw = trimmed.startsWith("{") || trimmed.startsWith("[") ? fromJson(trimmed) : fromMarkdown(trimmed);
+  if (trimmed.length > 256_000) {
+    throw new DomainError("bad_import", "The import file is too large.", "Split the file and import the pieces.");
+  }
+  const raw = trimmed.startsWith("{") || trimmed.startsWith("[") ? jsonOrMarkdown(trimmed) : fromMarkdown(trimmed);
   return raw.map((item) => ({ title: parseTitle(item.title), note: item.note.trim() }));
+}
+
+function jsonOrMarkdown(text: string): { title: string; note: string }[] {
+  try {
+    JSON.parse(text);
+  } catch {
+    if (/^# /m.test(text)) return fromMarkdown(text);
+    throw new DomainError("bad_import", "The import file is not valid JSON.", "Fix the JSON, or use markdown headings.");
+  }
+  return fromJson(text);
 }

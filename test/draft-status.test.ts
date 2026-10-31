@@ -1,5 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { lookupGithubDraft, NOT_GITHUB_WARNING, parsePullStatus, resolveDraftStatus } from "../src/draft-status.js";
+import {
+  API_FAILURE_WARNING,
+  interpretGithubProbe,
+  lookupGithubDraft,
+  NOT_GITHUB_WARNING,
+  OFFLINE_WARNING,
+  parsePullStatus,
+  RATE_LIMIT_WARNING,
+  resolveDraftStatus,
+} from "../src/draft-status.js";
 
 describe("draft status", () => {
   test("a non-github URL falls back without calling the API", () => {
@@ -35,5 +44,23 @@ describe("draft status", () => {
     expect(decided.draft).toBe(false);
     expect(decided.warning).toBeUndefined();
     expect(decided.message).toMatch(/closed/);
+  });
+
+  test("a rate limit is not treated as an offline report", () => {
+    const limited = interpretGithubProbe({ status: 1, stdout: "", stderr: "gh: API rate limit exceeded (HTTP 403)" });
+    expect(limited).toEqual({ ok: false, warning: RATE_LIMIT_WARNING, trustReport: false });
+    const offline = interpretGithubProbe({ status: null, stdout: "", stderr: "dial tcp: lookup api.github.com", errorCode: "ETIMEDOUT" });
+    expect(offline).toEqual({ ok: false, warning: OFFLINE_WARNING });
+    const rejected = interpretGithubProbe({ status: 1, stdout: "", stderr: "HTTP 500" });
+    expect(rejected).toEqual({ ok: false, warning: API_FAILURE_WARNING, trustReport: false });
+    const missing = interpretGithubProbe({
+      status: 1,
+      stdout: "{\"message\":\"Not Found\",\"status\":\"404\"}",
+      stderr: "gh: Not Found (HTTP 404)",
+    });
+    expect(missing).toEqual({ ok: false, warning: OFFLINE_WARNING });
+    const decided = resolveDraftStatus(true, "https://github.com/example-org/demo-board/pull/4", () => limited);
+    expect(decided.withheld).toBe(true);
+    expect(decided.draft).toBe(false);
   });
 });

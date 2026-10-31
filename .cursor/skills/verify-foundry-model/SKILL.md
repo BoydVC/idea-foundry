@@ -21,7 +21,7 @@ npm run tlc
 npm run tlc:mutant
 ```
 
-`statechart:check` fails when the legal `transition` edges and the TLA actions differ, or when `model/statechart.mmd` is stale. `npm run tlc` must exit 0. `npm run tlc:mutant` must exit 0 only because TLC reports that `VerifiedImpliesDraftPR` is violated. A mutant that typechecks and finds no violation is a failed check.
+`statechart:check` fails when the legal `transition` edges and the TLA actions differ, or when `model/statechart.mmd` is stale. `npm run tlc` must exit 0. `npm run tlc:mutant` must exit 0 only when `foundry_skip_gate.cfg` violates `DispatchRequiresGate`, `foundry_merge.cfg` violates `NoMergeState`, and `foundry_lost.cfg` violates `CASNoLostUpdate`. A mutant that typechecks and finds no violation is a failed check.
 
 Read a failing TLC log with `/statechart`. Do not copy that skill's commands into this file.
 
@@ -32,9 +32,11 @@ In the model, with one idea and two specs, and with the compare-and-swap counter
 - `NoMergeState`: the phase is never `merged`.
 - `VerifiedImpliesDraftPR`: a verified spec has the draft flag set by the gate.
 - `StackLandsBottomUp`: spec 2 is verified only after spec 1 is verified.
+- `VerifiedIdeaNeedsSpecs`: a verified idea still has both specs verified. Un-verify reopens the idea in the same step.
 - `CASNoLostUpdate`: the stored counter equals the number of successful commits.
+- Either spec can `gate_fail`, and the idea returns to `specced` when a spec is no longer gated, dispatched, or verified.
 
-The mutant deletes the gate precondition and the draft check. TLC's counterexample is restate, approve, decompose, dispatch from `specced`, verify while the draft flag is still false.
+`SkipGate` deletes the gate precondition on dispatch. TLC's counterexample reaches `dispatched` from `specced` and violates `DispatchRequiresGate`. `AllowMerge` reaches `merged`. `LoseUpdate` commits twice from the same read.
 
 ## What is not proved
 

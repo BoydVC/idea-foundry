@@ -53,3 +53,56 @@ test("add an idea and verify the bottom of its stack", async ({ page }) => {
   const merge = await page.request.post("/api/merge");
   expect(merge.status()).toBe(403);
 });
+
+test("an older refresh does not cover a newer board", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("idea-i-0001")).toBeVisible();
+  const stale = await page.evaluate(async () => {
+    const response = await fetch("/api/state");
+    return response.text();
+  });
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let hits = 0;
+  await page.route("**/api/state", async (route) => {
+    hits += 1;
+    if (hits === 1) {
+      await gate;
+      await route.fulfill({ status: 200, contentType: "application/json", body: stale });
+      return;
+    }
+    await route.continue();
+  });
+  await page.evaluate(() => {
+    const form = document.querySelector("#add-form");
+    const input = document.querySelector("#add-idea-title");
+    if (!(form instanceof HTMLFormElement) || !(input instanceof HTMLInputElement)) return;
+    input.value = "slow widget";
+    form.requestSubmit();
+    input.value = "fast widget";
+    form.requestSubmit();
+  });
+  await expect(page.getByTestId("board").getByText("fast widget")).toBeVisible();
+  release();
+  await page.waitForTimeout(400);
+  await expect(page.getByTestId("board").getByText("fast widget")).toBeVisible();
+  await expect(page.getByTestId("board").getByText("slow widget")).toBeVisible();
+});
+
+test("idea titles render as text", async ({ page }) => {
+  await page.goto("/");
+  const title = "<img src=x onerror=alert(1)>";
+  let dialogs = 0;
+  page.on("dialog", (dialog) => {
+    dialogs += 1;
+    dialog.dismiss().catch(() => undefined);
+  });
+  await page.getByTestId("add-idea-title").fill(title);
+  await page.getByTestId("add-idea-submit").click();
+  await expect(page.getByText(title, { exact: true }).first()).toBeVisible();
+  expect(dialogs).toBe(0);
+  const html = await page.locator("[data-testid='detail'] h2").evaluate((node) => node.innerHTML);
+  expect(html).toContain("&lt;img");
+});

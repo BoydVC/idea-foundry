@@ -256,8 +256,12 @@ function renderChart(source, counts) {
   chart.replaceChildren(svg);
 }
 
+let refreshGen = 0;
+
 async function refresh(keep) {
+  const gen = ++refreshGen;
   const [state, source, health] = await Promise.all([api("/api/state"), api("/api/statechart"), api("/api/health")]);
+  if (gen !== refreshGen) return state;
   if (health && health.port) document.querySelector("#port-label").textContent = `:${health.port}`;
   if (!keep && !selected && state.ideas[0]) selected = state.ideas[0].id;
   const counts = {};
