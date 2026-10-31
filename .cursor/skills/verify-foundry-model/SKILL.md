@@ -48,6 +48,6 @@ The model does not run the dashboard, the planner text, or the file lock. The lo
 | Draft and stack order | `src/commands.ts` `ingest` |
 | Chart | `model/foundry.tla`, `model/statechart.mmd`, `src/statechart.ts` |
 
-Last confirmed against commit `PENDING`. Move that commit forward only after the three commands above match this file at the new commit.
+Last confirmed against commit `88bdbac1d0f9302a9609d62ff44c44891a5cf73c`. Move that commit forward only after the three commands above match this file at the new commit.
 
 Keep the product code as it is when a check fails. Report the counterexample in the words of the actions. Suggest `/maintain-formal-verification-skill` when the model and `transition` drift.
