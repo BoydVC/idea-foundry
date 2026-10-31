@@ -20,13 +20,16 @@ import {
   transition,
   version,
 } from "./domain.js";
+import { backlogDecision, draftBacklogFromEnv, DRAFT_LIMIT, type DraftBacklogProbe } from "./draft-backlog.js";
 import { checkSpec, passed } from "./gates.js";
+import { weeklyDigest } from "./health.js";
+import { lessonFindings } from "./lesson-checks.js";
 import { DEFAULT_TARGET, buildPacket, parsePacket, parseReport, parseTarget, type ReportDoc } from "./packet.js";
 import { type Advisory } from "./review.js";
 import { checkFoundryModel } from "./tlc.js";
 import { join } from "node:path";
 import { lookupGithubDraft, resolveDraftStatus, type DraftProbe } from "./draft-status.js";
-import { draftOf, parseImportFile } from "./import-notes.js";
+import { draftOf, parseBookmarkExport, parseImportFile } from "./import-notes.js";
 import { SEED_TITLES, type Planner, type Restatement } from "./planner.js";
 import { Store, type StoreResult } from "./store.js";
 
@@ -73,12 +76,42 @@ function stale(actual: number, expected: number | undefined): CommandErr | null 
   );
 }
 
-function applyTlc(gates: GateResult[], tlcOk: boolean): GateResult[] {
-  if (tlcOk) return gates;
+function applyTlc(gates: GateResult[], tlc: { ok: boolean; detail: string }): GateResult[] {
+  if (tlc.ok) return gates;
+  const javaMissing = tlc.detail.includes("Java is not on PATH");
   return gates.map((gate) => {
-    if (gate.gate !== "G3") return gate;
-    const findings = [...gate.findings, { key: "g3:tlc", detail: "TLC did not pass model/foundry.tla." }];
-    return { gate: "G3", pass: false, findings };
+    if (gate.gate !== "G1") return gate;
+    const findings = [
+      ...gate.findings,
+      {
+        key: "g1:tlc",
+        detail: javaMissing ? "Java is not on PATH. TLC did not run. Install a JDK 21." : "TLC did not pass model/foundry.tla.",
+        proof: javaMissing ? 1 : 4,
+      } as const,
+    ];
+    return { gate: "G1" as const, pass: false, findings };
+  });
+}
+
+function dedupeFindings(findings: readonly Finding[]): Finding[] {
+  const seen = new Set<string>();
+  const out: Finding[] = [];
+  for (const finding of findings) {
+    const key = `${finding.key}|${finding.detail}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(finding);
+  }
+  return out;
+}
+
+function mergeLessonFindings(gates: GateResult[], extra: readonly Finding[]): GateResult[] {
+  return gates.map((gate) => {
+    const prefix = gate.gate.toLowerCase();
+    const added = extra.filter((item) => item.key.startsWith(`${prefix}:`));
+    if (added.length === 0) return gate;
+    const findings = dedupeFindings([...gate.findings, ...added]);
+    return { gate: gate.gate, pass: findings.length === 0, findings };
   });
 }
 
@@ -331,6 +364,7 @@ export function decompose(store: Store, id: string, planner: Planner, dryRun: bo
         body: draft.body,
         acceptance: draft.acceptance,
         touch: draft.touch,
+        sketch: draft.sketch,
         maxLines: draft.maxLines,
         landsAfter,
         gates: [],
@@ -394,7 +428,7 @@ export function gate(store: Store, id: string, dryRun: boolean, advisory?: Advis
     if (spec.state === "dispatched" || spec.state === "verified" || spec.state === "rejected" || spec.state === "parked") {
       return spec;
     }
-    const gates = applyTlc(checkSpec(spec, specs), tlc.ok);
+    const gates = mergeLessonFindings(applyTlc(checkSpec(spec, specs), tlc), lessonFindings(spec, specs, snap.lessons));
     for (const item of gates) {
       if (!item.pass) findings.push(...item.findings);
     }
@@ -451,7 +485,13 @@ export function gate(store: Store, id: string, dryRun: boolean, advisory?: Advis
   }
 }
 
-export function dispatch(store: Store, id: string, dryRun: boolean, expectedVersion?: number): CommandResult {
+export function dispatch(
+  store: Store,
+  id: string,
+  dryRun: boolean,
+  expectedVersion?: number,
+  drafts: DraftBacklogProbe = draftBacklogFromEnv(),
+): CommandResult {
   const spec = store.findSpec(id);
   if (!spec) return missingSpec(id);
   const blocked = stale(spec.version, expectedVersion);
@@ -475,12 +515,15 @@ export function dispatch(store: Store, id: string, dryRun: boolean, expectedVers
     }
   }
   const target = parseTarget(process.env.FOUNDRY_TARGET ?? DEFAULT_TARGET);
+  const limit = Number(process.env.FOUNDRY_DRAFT_LIMIT ?? DRAFT_LIMIT);
+  const backlog = backlogDecision(drafts(target), Number.isInteger(limit) && limit > 0 ? limit : DRAFT_LIMIT);
+  if (backlog.refuse) return fail(409, "draft_backlog", backlog.message, backlog.next);
   const packet = buildPacket(spec, target, store.now());
   const body = `${JSON.stringify(packet, null, 2)}\n`;
   const packetPath = join(store.root, "packets", `${spec.id}.json`);
   if (dryRun) {
     const preview = parseSpec(bump(spec, { state: "dispatched", packetPath }, store.now()));
-    return ok({ spec: preview, packet }, { dryRun: true });
+    return ok({ spec: preview, packet }, { dryRun: true, warning: backlog.warning });
   }
   try {
     const saved = store.transact(
@@ -493,10 +536,12 @@ export function dispatch(store: Store, id: string, dryRun: boolean, expectedVers
       },
       { packet: { id: spec.id, body }, intake: packet.intake },
     );
-    return fromStore(saved, (value) => ({
+    const savedResult = fromStore(saved, (value) => ({
       spec: value.specs.find((item) => item.id === spec.id),
       packet,
     }));
+    if (savedResult.ok && backlog.warning) return { ...savedResult, warning: backlog.warning };
+    return savedResult;
   } catch (error) {
     return fromThrown(error);
   }
@@ -789,10 +834,102 @@ export function importNotes(store: Store, text: string, planner: Planner, dryRun
   return ok({ count: saved.length, ideas: saved });
 }
 
+export function importBookmarks(store: Store, text: string, planner: Planner, dryRun: boolean): CommandResult {
+  let rows;
+  try {
+    rows = parseBookmarkExport(text);
+  } catch (error) {
+    return fromThrown(error);
+  }
+  if (rows.length === 0) {
+    return fail(400, "empty_import", "The bookmark file has no rows.", "Add id, author, text, and date, then import again.");
+  }
+  const seen = new Set(store.load().seenBookmarkIds);
+  const fresh: typeof rows = [];
+  const batch = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.id) || batch.has(row.id)) continue;
+    batch.add(row.id);
+    fresh.push(row);
+  }
+  if (dryRun) return ok({ count: fresh.length, skipped: rows.length - fresh.length }, { dryRun: true });
+  const saved: unknown[] = [];
+  for (const row of fresh) {
+    const made = createIdea(store, row.text, false);
+    if (!made.ok) return made;
+    const idea = made.data as Idea;
+    const drafted = draftOf(row.text, row.text);
+    const restated = restate(store, idea.id, planner, false, idea.version, drafted);
+    if (!restated.ok) return restated;
+    const remembered = store.transact({ ideas: [], specs: [] }, (snap) => {
+      if (snap.seenBookmarkIds.includes(row.id)) return snap;
+      return { ...snap, seenBookmarkIds: [...snap.seenBookmarkIds, row.id] };
+    });
+    if (!remembered.ok) return remembered;
+    saved.push(restated.data);
+  }
+  return ok({ count: saved.length, skipped: rows.length - fresh.length, ideas: saved }, { idempotent: saved.length === 0 });
+}
+
+function proposalBody(lesson: { key: string; detail: string; promotedTo: string }): string {
+  const gate = lesson.promotedTo;
+  return [
+    `# Proposal ${lesson.key}`,
+    "",
+    `Gate: ${gate}`,
+    "",
+    "This file is a proposal. Foundry does not apply it.",
+    "",
+    lesson.detail,
+    "",
+    "## Failing fixture",
+    "",
+    "```ts",
+    `test("${lesson.key} is still open", () => {`,
+    `  const gate = "${gate}";`,
+    `  const key = "${lesson.key}";`,
+    "  if (gate.length > 0 && key.length > 0) {",
+    `    throw new Error("fixture: ${lesson.key} is not encoded in LESSON_CHECKS yet");`,
+    "  }",
+    "});",
+    "```",
+    "",
+    "## Rule stub",
+    "",
+    "A `.cursor/rules` stub would restate this lesson. It is not written outside this proposal.",
+    "",
+  ].join("\n");
+}
+
+export function correct(store: Store): CommandResult {
+  const lessons = store.load().lessons;
+  if (lessons.length === 0) {
+    return ok({ proposals: [], lessons: [] }, { idempotent: true });
+  }
+  const proposals: { path: string; gate: string; key: string; idempotent: boolean }[] = [];
+  for (const lesson of lessons) {
+    const name = `${lesson.key.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}.md`;
+    const written = store.writeProposal(name, proposalBody(lesson));
+    proposals.push({ path: written.path, gate: lesson.promotedTo, key: lesson.key, idempotent: written.idempotent });
+  }
+  return ok({ proposals, lessons }, { idempotent: proposals.every((item) => item.idempotent) });
+}
+
+export function weekly(store: Store, since: string): CommandResult {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(since) || Number.isNaN(Date.parse(`${since}T00:00:00.000Z`))) {
+    return fail(400, "bad_since", "weekly needs a YYYY-MM-DD date.", "Run `foundry weekly --since 2026-10-24`.");
+  }
+  try {
+    return ok(weeklyDigest(store.load(), since));
+  } catch (error) {
+    return fromThrown(error);
+  }
+}
+
 export function noteFinding(store: Store, key: string, detail: string): CommandResult {
   try {
     promote(key);
-    const saved = store.transact({ ideas: [], specs: [] }, (snap) => recordFindings(snap, [{ key, detail }], store.now()));
+    const saved = store.transact({ ideas: [], specs: [] }, (snap) => recordFindings(snap, [{ key, detail, proof: 1 }], store.now()));
     return fromStore(saved, (value) => ({ lessons: value.lessons, findingCounts: value.findingCounts }));
   } catch (error) {
     return fromThrown(error);

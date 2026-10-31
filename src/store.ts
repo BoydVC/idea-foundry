@@ -200,6 +200,20 @@ export class Store {
     return readFileSync(join(this.modelDir(), name), "utf8");
   }
 
+  writeProposal(name: string, body: string): { path: string; idempotent: boolean } {
+    if (!/^[a-z0-9.-]+$/.test(name)) {
+      throw new DomainError("bad_proposal", "Proposal name rejected.", "Use a short file name for the lesson proposal.");
+    }
+    return this.withLock(() => {
+      const dir = join(this.root, "lessons", "proposals");
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, name);
+      if (existsSync(path) && readFileSync(path, "utf8") === body) return { path, idempotent: true };
+      writeFileSync(path, body);
+      return { path, idempotent: false };
+    });
+  }
+
   readIntake(): IntakeLine[] {
     const path = join(this.root, "intake.jsonl");
     if (!existsSync(path)) return [];

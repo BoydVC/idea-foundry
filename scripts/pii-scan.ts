@@ -32,6 +32,19 @@ function ensureDenylist(): string[] {
     .filter((line) => line.length > 0 && !line.startsWith("#"));
 }
 
+function toolMissing(name: string): boolean {
+  const ran = spawnSync(name, ["--version"], { encoding: "utf8" });
+  return (ran.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
+function requireScanTools(): void {
+  const missing = ["ffmpeg", "tesseract"].filter((name) => toolMissing(name));
+  if (missing.length === 0) return;
+  const error = `${missing.join(" and ")} is not installed. npm run pii OCRs screenshots/demo.gif and needs tesseract and ffmpeg. TLC needs a JDK 21. See README Prerequisites.`;
+  process.stdout.write(`${JSON.stringify({ ok: false, error }, null, 2)}\n`);
+  process.exit(1);
+}
+
 function ocrGif(): { frames: number; text: string } {
   if (!existsSync(gifPath)) return { frames: 0, text: "" };
   const dir = mkdtempSync(join(tmpdir(), "foundry-ocr-"));
@@ -53,6 +66,7 @@ function ocrGif(): { frames: number; text: string } {
   }
 }
 
+requireScanTools();
 const extra = ensureDenylist();
 const files: string[] = [];
 walk(root, files);

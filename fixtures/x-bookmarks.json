@@ -1,0 +1,16 @@
+{
+  "bookmarks": [
+    {
+      "id": "bk-habit",
+      "author": "synthetic-author",
+      "text": "Ship a habit tracker export with synthetic rows.",
+      "date": "2026-10-20"
+    },
+    {
+      "id": "bk-weather",
+      "author": "synthetic-author",
+      "text": "Show a weather widget card for a synthetic forecast.",
+      "date": "2026-10-21"
+    }
+  ]
+}

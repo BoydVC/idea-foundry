@@ -1,0 +1,62 @@
+{
+  "habit tracker export": {
+    "goal": "Ship a synthetic habit export.",
+    "problem": "There is no typed export for synthetic habit rows.",
+    "smallestChange": "Add a ledger type and a rollup function.",
+    "doneWhen": "node --test exits 0 for the ledger slice.",
+    "questions": [
+      "Which user action ships first for \"habit tracker export\"?",
+      "Which existing module must stay unchanged?",
+      "Which command shows that this slice is done?"
+    ],
+    "slices": ["ledger", "rollup"]
+  },
+  "weather widget": {
+    "goal": "Ship a synthetic forecast card.",
+    "problem": "There is no typed card for a synthetic forecast.",
+    "smallestChange": "Add a card type and an empty state.",
+    "doneWhen": "node --test exits 0 for the card slice.",
+    "questions": [
+      "Which user action ships first for \"weather widget\"?",
+      "Which existing module must stay unchanged?",
+      "Which command shows that this slice is done?"
+    ],
+    "slices": ["card", "empty-state"]
+  },
+  "trivia scoring": {
+    "goal": "Ship synthetic trivia scoring.",
+    "problem": "There is no typed score for a synthetic round.",
+    "smallestChange": "Add a score type and a board summary.",
+    "doneWhen": "node --test exits 0 for the score slice.",
+    "questions": [
+      "Which user action ships first for \"trivia scoring\"?",
+      "Which existing module must stay unchanged?",
+      "Which command shows that this slice is done?"
+    ],
+    "slices": ["score", "board"]
+  },
+  "palette mixer": {
+    "goal": "Ship a synthetic palette mix.",
+    "problem": "There is no typed swatch for three synthetic colors.",
+    "smallestChange": "Add a swatch type and a blend function.",
+    "doneWhen": "node --test exits 0 for the swatch slice.",
+    "questions": [
+      "Which user action ships first for \"palette mixer\"?",
+      "Which existing module must stay unchanged?",
+      "Which command shows that this slice is done?"
+    ],
+    "slices": ["swatch", "blend"]
+  },
+  "outline export": {
+    "goal": "Ship a synthetic outline export.",
+    "problem": "There is no typed tree for a synthetic outline.",
+    "smallestChange": "Add a tree type and a file-out function.",
+    "doneWhen": "node --test exits 0 for the tree slice.",
+    "questions": [
+      "Which user action ships first for \"outline export\"?",
+      "Which existing module must stay unchanged?",
+      "Which command shows that this slice is done?"
+    ],
+    "slices": ["tree", "file-out"]
+  }
+}

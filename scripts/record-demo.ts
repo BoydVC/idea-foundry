@@ -1,10 +1,26 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
 import { startServer } from "../src/server.js";
 import { Store } from "../src/store.js";
 import { acceptIntake, ensureDraftDay } from "./accept-draft-day.js";
 
+export function writeDemoGif(videoPath: string, gifPath: string): void {
+  const ran = spawnSync(
+    "ffmpeg",
+    ["-y", "-i", videoPath, "-vf", "fps=8,scale=800:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse", "-loop", "0", gifPath],
+    { encoding: "utf8" },
+  );
+  if (ran.status !== 0) {
+    const detail = (ran.stderr || ran.stdout || "ffmpeg failed").trim();
+    throw new Error(`ffmpeg could not write ${gifPath}. Install ffmpeg (see README Prerequisites). ${detail}`);
+  }
+}
+
+async function main(): Promise<void> {
+if (!process.env.FOUNDRY_OPEN_DRAFTS) process.env.FOUNDRY_OPEN_DRAFTS = "0";
 ensureDraftDay();
 
 const store = new Store("data/demo");
@@ -74,7 +90,7 @@ try {
   await page.getByTestId("detail").locator(".mono").first().getByText("verified").waitFor();
   await page.getByTestId("banner").scrollIntoViewIfNeeded();
   await pause(700);
-  await page.screenshot({ path: "screenshots/04-verified.png" });
+  await page.screenshot({ path: "screenshots/05-verified.png" });
   await page.getByTestId("pipeline-health").scrollIntoViewIfNeeded();
   await page.getByTestId("health-mean").waitFor();
   await pause(800);
@@ -89,6 +105,13 @@ try {
   await new Promise((resolve) => running.server.close(() => resolve(null)));
   if (video) {
     const path = await video.path();
-    process.stdout.write(`${path}\n`);
+    writeDemoGif(path, join("screenshots", "demo.gif"));
+    process.stdout.write(`${join("screenshots", "demo.gif")}\n`);
   }
+}
+}
+
+const calledDirectly = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (calledDirectly) {
+  await main();
 }

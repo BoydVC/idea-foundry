@@ -2,6 +2,14 @@
 
 Idea Foundry turns one raw idea into an ordered stack of small specs, runs the static gates, and writes a draft arena packet. It does not merge, deploy, or send anything.
 
+## Prerequisites
+
+- Node.js 20 or newer
+- JDK 21 on `PATH` as `java`, for `npm run tlc` and `npm run tlc:mutant`. When `java` is missing outside CI, those commands print `SKIP: Java is not on PATH` and exit 0. CI treats a missing JDK as an error.
+- `tesseract` and `ffmpeg`, for `npm run pii` (it OCRs `screenshots/demo.gif`) and for `scripts/record-demo.ts` (it rebuilds that gif from the recorded video). A missing tool exits with a JSON error that names the tool and these prerequisites.
+
+`foundry dispatch` reads open draft pull requests for the target repo and refuses with status 409 when that count is above 10. Set `FOUNDRY_OPEN_DRAFTS` only in tests and the local demo. An unreachable GitHub API prints a warning and still dispatches.
+
 ## Run the pipeline
 
 About two minutes from a raw idea to a Draft Day pick. This does not merge anything.
@@ -40,12 +48,17 @@ Every command prints one JSON object. Add `--dry-run` to preview a write. A stal
 
 `ingest` accepts only `https://github.com/<owner>/<repo>/pull/<number>`. It asks the GitHub API whether that pull request is a draft, including when the spec is already verified. When the API answers, that answer wins. When GitHub says the pull request is closed or no longer a draft, re-ingest moves that spec from verified back to dispatched and reopens a verified idea. A higher spec must leave verified first, and that check is repeated after the GitHub call returns. An offline, 404, or non-GitHub answer does not un-verify. A rate limit or an HTTP 5xx response does not use the report line and does not un-verify. Re-ingest a verified spec with the pull request URL already stored on it. When the API is unreachable, ingest uses the report line and returns a warning. Pass `--version` or `--record-version` to send the record version you read. A mismatch returns 409. A version that is present but not an integer returns 400. `foundry gate` runs TLC on `model/foundry.tla`, fails the gate when TLC fails, and fails a spec that shares a touch path with another spec in the stack. `foundry dispatch` appends `{idea, source, target, n}` to `intake.jsonl` only after the compare-and-swap succeeds.
 
-`foundry import` reads a JSON file (`bookmarks` or `notes`) or a markdown file of `#` headings and restates each item into one line: a problem and a done-when. The repo fixtures are synthetic.
+`foundry import` reads a JSON file (`bookmarks` or `notes`) or a markdown file of `#` headings and restates each item into one line: a problem and a done-when. `foundry import --from bookmarks.json` reads a bookmark export of `id`, `author`, `text`, and `date`, and skips ids it has already stored. The repo fixtures are synthetic.
 
 ```bash
 npm run foundry -- import fixtures/bookmarks.json
 npm run foundry -- import fixtures/notes.md
+npm run foundry -- import --from fixtures/x-bookmarks.json
+npm run foundry -- weekly --since 2026-10-24
+npm run foundry -- correct
 ```
+
+`FOUNDRY_PLANNER=fixture` (the default) is the offline planner. `FOUNDRY_PLANNER=agent` restates in its own words and sketches types and signatures. Point `FOUNDRY_PLANNER_RECORD` at a JSON file to replay a recorded response. `FOUNDRY_PORT` chooses the dashboard port. `foundry correct` writes lesson proposals under the data directory and does not apply them. `foundry weekly` prints ideas moved, specs verified, open draft pull requests, and dispatched specs older than 7 days.
 
 ## Checks
 

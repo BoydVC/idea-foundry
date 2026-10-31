@@ -29,7 +29,7 @@ export const EVENTS = [
 
 export type EventName = (typeof EVENTS)[number];
 
-export const GATES = ["G1", "G2", "G3"] as const;
+export const GATES = ["G0", "G1", "G2", "G3"] as const;
 export type GateId = (typeof GATES)[number];
 
 export const LAYERS = ["G0", "G1", "G2", "G3"] as const;
@@ -442,7 +442,11 @@ function parseLabels(raw: unknown): readonly string[] {
   return raw as string[];
 }
 
-export type Finding = { key: string; detail: string };
+export type ProofLevel = 1 | 2 | 3 | 4 | 5;
+
+export type Finding = { key: string; detail: string; proof: ProofLevel };
+
+export type Sketch = { types: string; signatures: readonly string[] };
 
 export type GateResult = {
   gate: GateId;
@@ -504,6 +508,7 @@ export type SpecBase = {
   body: string;
   acceptance: readonly string[];
   touch: readonly string[];
+  sketch: Sketch;
   maxLines: number;
   landsAfter: SpecId | null;
   gates: readonly GateResult[];
@@ -545,13 +550,14 @@ export type Snapshot = {
   stacks: Stack[];
   lessons: Lesson[];
   findingCounts: Record<string, number>;
+  seenBookmarkIds: readonly string[];
 };
 
 function parseGate(raw: unknown): GateResult {
   if (!isRecord(raw)) throw new DomainError("bad_gate", "A gate result must be an object.", "Re-run `foundry gate <id>`.");
   const gate = raw.gate;
-  if (gate !== "G1" && gate !== "G2" && gate !== "G3") {
-    throw new DomainError("bad_gate", "Gate id must be G1, G2, or G3.", "Re-run `foundry gate <id>`.");
+  if (gate !== "G0" && gate !== "G1" && gate !== "G2" && gate !== "G3") {
+    throw new DomainError("bad_gate", "Gate id must be G0, G1, G2, or G3.", "Re-run `foundry gate <id>`.");
   }
   if (typeof raw.pass !== "boolean" || !Array.isArray(raw.findings)) {
     throw new DomainError("bad_gate", "A gate result needs pass and findings.", "Re-run `foundry gate <id>`.");
@@ -561,7 +567,11 @@ function parseGate(raw: unknown): GateResult {
     if (!isRecord(item) || typeof item.key !== "string" || typeof item.detail !== "string") {
       throw new DomainError("bad_gate", "Each finding needs a key and a detail.", "Re-run `foundry gate <id>`.");
     }
-    findings.push({ key: item.key, detail: item.detail });
+    const proof = item.proof;
+    if (proof !== 1 && proof !== 2 && proof !== 3 && proof !== 4 && proof !== 5) {
+      throw new DomainError("bad_gate", "Each finding needs a proof level from 1 to 5.", "Re-run `foundry gate <id>`.");
+    }
+    findings.push({ key: item.key, detail: item.detail, proof });
   }
   const pass = findings.length === 0;
   if (raw.pass !== pass) {
@@ -581,12 +591,12 @@ function readyForLaterPhase(spec: SpecBase): void {
       "Add both, then run `foundry gate <id>`.",
     );
   }
-  if (spec.gates.length !== 3 || spec.gates.some((gate) => !gate.pass)) {
-    throw new DomainError("gates_red", "G1, G2, and G3 must all pass.", "Fix the findings, then run `foundry gate <id>`.");
+  if (spec.gates.length !== 4 || spec.gates.some((gate) => !gate.pass)) {
+    throw new DomainError("gates_red", "G0, G1, G2, and G3 must all pass.", "Fix the findings, then run `foundry gate <id>`.");
   }
   const ids = spec.gates.map((gate) => gate.gate);
-  if (ids[0] !== "G1" || ids[1] !== "G2" || ids[2] !== "G3") {
-    throw new DomainError("gates_red", "Gate results must be G1 then G2 then G3.", "Re-run `foundry gate <id>`.");
+  if (ids[0] !== "G0" || ids[1] !== "G1" || ids[2] !== "G2" || ids[3] !== "G3") {
+    throw new DomainError("gates_red", "Gate results must be G0 then G1 then G2 then G3.", "Re-run `foundry gate <id>`.");
   }
 }
 
@@ -607,6 +617,7 @@ function parseSpecBase(source: Record<string, unknown>): SpecBase {
   if (!Array.isArray(touch) || touch.some((item) => typeof item !== "string")) {
     throw new DomainError("bad_touch", "The touch map must be a list of paths.", "List the files this spec may change.");
   }
+  const sketch = parseSketch(source.sketch);
   const landsRaw = source.landsAfter;
   const landsAfter = landsRaw === null || landsRaw === undefined ? null : specId(String(landsRaw));
   if (index === 1 && landsAfter !== null) {
@@ -629,6 +640,7 @@ function parseSpecBase(source: Record<string, unknown>): SpecBase {
     body: reqString(source, "body"),
     acceptance: acceptance as string[],
     touch: touch as string[],
+    sketch,
     maxLines,
     landsAfter,
     gates: gatesRaw.map(parseGate),
@@ -681,6 +693,19 @@ export function parseSpec(input: unknown): Spec {
     default:
       return assertNever(state);
   }
+}
+
+function parseSketch(raw: unknown): Sketch {
+  if (!isRecord(raw)) {
+    throw new DomainError("bad_sketch", "A spec needs a sketch with types and signatures.", "Decompose the idea again.");
+  }
+  if (typeof raw.types !== "string" || raw.types.trim() === "") {
+    throw new DomainError("bad_sketch", "The sketch needs a types block.", "Add types to the architect sketch.");
+  }
+  if (!Array.isArray(raw.signatures) || raw.signatures.length === 0 || raw.signatures.some((item) => typeof item !== "string" || item.trim() === "")) {
+    throw new DomainError("bad_sketch", "The sketch needs at least one signature.", "Add function signatures to the architect sketch.");
+  }
+  return { types: raw.types, signatures: raw.signatures as string[] };
 }
 
 function ideaStory(source: Record<string, unknown>): {
@@ -799,6 +824,7 @@ export function emptySnapshot(): Snapshot {
     stacks: [],
     lessons: [],
     findingCounts: {},
+    seenBookmarkIds: [],
   };
 }
 
@@ -820,6 +846,10 @@ export function parseSnapshot(input: unknown): Snapshot {
   const specs = Array.isArray(input.specs) ? input.specs.map(parseSpec) : [];
   const stacks = Array.isArray(input.stacks) ? input.stacks.map(parseStack) : [];
   const lessons = Array.isArray(input.lessons) ? input.lessons.map(parseLesson) : [];
+  const seenRaw = input.seenBookmarkIds === undefined ? [] : input.seenBookmarkIds;
+  if (!Array.isArray(seenRaw) || seenRaw.some((item) => typeof item !== "string" || item.trim() === "")) {
+    throw new DomainError("bad_state", "seenBookmarkIds must be a list of ids.", "Delete the data directory and start again.");
+  }
   return {
     version: version(Number(input.version ?? 0)),
     nextIdea: typeof input.nextIdea === "number" ? input.nextIdea : ideas.length + 1,
@@ -829,6 +859,7 @@ export function parseSnapshot(input: unknown): Snapshot {
     stacks,
     lessons,
     findingCounts: counts,
+    seenBookmarkIds: seenRaw as string[],
   };
 }
 

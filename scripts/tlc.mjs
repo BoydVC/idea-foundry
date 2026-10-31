@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, createWriteStream } from "node:fs";
 import { get } from "node:https";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireJava } from "./java-preflight.mjs";
+
+requireJava("TLC");
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const jar = join(root, "tools", "tla2tools.jar");

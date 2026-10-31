@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { checkG1, checkG2, checkG3, sharedTouchFindings } from "../src/gates.js";
+import { checkG0, checkG1, checkG2, checkG3, sharedTouchFindings, sketchSource } from "../src/gates.js";
+import { sketchFor } from "../src/planner.js";
 
 const good = {
   id: "s-0001-2" as const,
@@ -50,9 +51,29 @@ describe("gates", () => {
     const other = { id: "s-0001-1" as const, touch: ["src/weather-widget/rules.ts", "src/weather-widget/rules.test.ts"] };
     const self = { id: "s-0001-2" as const, touch: ["src/weather-widget/rules.ts"] };
     expect(sharedTouchFindings(self, [other, self])).toEqual([
-      { key: "g1:blast", detail: "src/weather-widget/rules.ts is also touched by s-0001-1." },
+      { key: "g1:blast", detail: "src/weather-widget/rules.ts is also touched by s-0001-1.", proof: 2 },
     ]);
     expect(sharedTouchFindings(self, [self])).toEqual([]);
+  });
+
+  test("a core file without a runnable acceptance command fails at proof level 1", () => {
+    const storeSpec = { ...good, touch: ["src/store.ts"], acceptance: ["echo hi"] };
+    const domainSpec = { ...good, touch: ["src/domain.ts"], acceptance: ["looks done"] };
+    expect(checkG1(storeSpec).findings.some((item) => item.key === "g1:proof" && item.proof < 4)).toBe(true);
+    expect(checkG1(domainSpec).pass).toBe(false);
+    const proved = checkG1({ ...good, touch: ["src/store.ts", "src/store.test.ts"] });
+    expect(proved.findings.some((item) => item.key === "g1:proof")).toBe(false);
+    expect(proved.pass).toBe(true);
+  });
+
+  test("G0 typechecks the architect sketch", () => {
+    const sketch = sketchFor("weather widget", "rules");
+    expect(checkG0({ sketch }).pass).toBe(true);
+    expect(sketchSource(sketch)).toContain("not implemented");
+    const broken = checkG0({ sketch: { types: "export type Broken = {", signatures: ['export function nope(): void { throw new Error("not implemented"); }'] } });
+    expect(broken.pass).toBe(false);
+    expect(broken.findings[0]?.proof).toBe(4);
+    expect(broken.findings[0]?.key).toBe("g0:sketch");
   });
 
   test("G3 fails when the spec orders a merge or skips its predecessor", () => {

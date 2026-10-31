@@ -1,4 +1,20 @@
 const PHASES = ["raw", "restated", "approved", "specced", "gated", "dispatched", "verified", "rejected", "parked"];
+const LAYER = { G0: "architecture", G1: "static", G2: "skills", G3: "human" };
+
+function proofOf(gate, spec) {
+  if (gate.findings && gate.findings.length > 0) {
+    return gate.findings.reduce((min, item) => Math.min(min, item.proof || 1), 5);
+  }
+  const runnable = (spec.acceptance || []).some((command) => /^(node|npm|npx|tsc)(\s+\S+)+$/.test(command) && !/[;&|`$<>(){}!\n\r]/.test(command));
+  return runnable ? 4 : 1;
+}
+
+function gateLine(gate, spec) {
+  const layer = LAYER[gate.gate] || "layer";
+  const proof = proofOf(gate, spec);
+  if (gate.pass) return `${gate.gate} pass · ${layer} · proof ${proof}`;
+  return `${gate.gate} fail · ${layer} · proof ${proof}: ${gate.findings.map((item) => item.detail).join(" ")}`;
+}
 const DEMO_PR = "https://github.com/example-org/demo-board/pull/1";
 
 const POS = {
@@ -105,6 +121,7 @@ function renderDetail(state) {
   const idea = state.ideas.find((item) => item.id === selected) || state.ideas[0];
   if (!idea) {
     detail.append(el("p", { text: "Add an idea to open a stack." }));
+    renderGates([]);
     return;
   }
   selected = idea.id;
@@ -132,7 +149,10 @@ function renderDetail(state) {
   detail.append(actions);
 
   const specs = specsFor(state, idea);
-  if (specs.length === 0) return;
+  if (specs.length === 0) {
+    renderGates([]);
+    return;
+  }
   const lanes = el("div", { class: "lanes", "data-testid": "lanes" });
   for (const spec of specs) {
     const lane = el("article", { class: "lane", "data-testid": `spec-${spec.id}` });
@@ -143,7 +163,7 @@ function renderDetail(state) {
       const row = el("p", {
         class: gate.pass ? "pass" : "fail",
         "data-testid": `gate-${spec.id}-${gate.gate}`,
-        text: gate.pass ? `${gate.gate} pass` : `${gate.gate} fail: ${gate.findings.map((item) => item.detail).join(" ")}`,
+        text: gateLine(gate, spec),
       });
       lane.append(row);
     }
@@ -166,6 +186,27 @@ function renderDetail(state) {
     lanes.append(lane);
   }
   detail.append(lanes);
+  renderGates(specs);
+}
+
+function renderGates(specs) {
+  const root = document.querySelector("#gates-panel");
+  if (!root) return;
+  root.replaceChildren();
+  root.append(el("h2", { text: "Gates" }));
+  if (!specs || specs.length === 0) {
+    root.append(el("p", { text: "No spec is gated yet." }));
+    return;
+  }
+  for (const spec of specs) {
+    if (!spec.gates || spec.gates.length === 0) {
+      root.append(el("p", { text: `${spec.id} has not been gated.` }));
+      continue;
+    }
+    for (const gate of spec.gates) {
+      root.append(el("p", { "data-testid": `panel-${spec.id}-${gate.gate}`, text: `${spec.id} ${gateLine(gate, spec)}` }));
+    }
+  }
 }
 
 function renderLessons(state) {
@@ -187,7 +228,7 @@ function renderHealth(health) {
   if (!pipe) return;
   const states = el("p", { "data-testid": "health-states" });
   for (const phase of PHASES) states.append(el("span", { class: "chip", text: `${phase} ${pipe.ideasByState[phase] || 0}` }));
-  const rates = ["G1", "G2", "G3"]
+  const rates = ["G0", "G1", "G2", "G3"]
     .map((id) => {
       const row = pipe.gatePassRates[id];
       const label = !row || row.rate === null ? "n/a" : `${Math.round(row.rate * 100)}%`;
@@ -213,7 +254,7 @@ function renderChart(source, counts) {
   chartSrc.textContent = source;
   const edges = [];
   for (const line of source.split("\n")) {
-    const match = line.match(/^\s*([a-z]+) --> ([a-z]+): ([a-z_]+)\s*$/);
+    const match = line.match(/^\s*([a-z]+) --> ([a-z]+): (.+)\s*$/);
     if (match) edges.push({ from: match[1], to: match[2], event: match[3] });
   }
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");

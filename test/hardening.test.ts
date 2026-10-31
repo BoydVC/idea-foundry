@@ -179,7 +179,7 @@ describe("hardening", () => {
         { id: "s-0001-2", touch: ["src/widget/./model.ts"] },
         [{ id: "s-0001-1", touch: ["src/widget/model.ts"] }],
       ),
-    ).toEqual([{ key: "g1:blast", detail: "src/widget/model.ts is also touched by s-0001-1." }]);
+    ).toEqual([{ key: "g1:blast", detail: "src/widget/model.ts is also touched by s-0001-1.", proof: 2 }]);
   });
 
   test("a normalized alias of a shared touch path fails the gate", () => {

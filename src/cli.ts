@@ -1,6 +1,8 @@
 import { pathToFileURL } from "node:url";
-import { createIdea, approve, decompose, dispatch, gate, importNotes, ingest, park, probePeerReview, restate, seedDemo } from "./commands.js";
-import { SEED_TITLES, FixturePlanner } from "./planner.js";
+import { createIdea, approve, correct, decompose, dispatch, gate, importBookmarks, importNotes, ingest, park, probePeerReview, restate, seedDemo, weekly } from "./commands.js";
+import { foundryPort } from "./port.js";
+import { selectPlanner } from "./planners/llm.js";
+import { SEED_TITLES } from "./planner.js";
 import { Store } from "./store.js";
 
 type Flags = {
@@ -9,6 +11,8 @@ type Flags = {
   note?: string;
   report?: string;
   pr?: string;
+  from?: string;
+  since?: string;
   draft?: boolean;
   version?: number;
   help: boolean;
@@ -28,7 +32,7 @@ function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
       if (!value || !/^\d+$/.test(value)) throw new Error(`${arg} needs a non-negative integer.`);
       i += 1;
       flags.version = Number(value);
-    } else if (arg === "--data" || arg === "--note" || arg === "--report" || arg === "--pr") {
+    } else if (arg === "--data" || arg === "--note" || arg === "--report" || arg === "--pr" || arg === "--from" || arg === "--since") {
       const value = argv[i + 1];
       if (!value) throw new Error(`Missing value for ${arg}.`);
       i += 1;
@@ -36,6 +40,8 @@ function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
       if (arg === "--note") flags.note = value;
       if (arg === "--report") flags.report = value;
       if (arg === "--pr") flags.pr = value;
+      if (arg === "--from") flags.from = value;
+      if (arg === "--since") flags.since = value;
     } else if (arg !== undefined) rest.push(arg);
   }
   return { flags, rest };
@@ -55,6 +61,9 @@ const HELP = {
       "foundry ingest s-0001-1 --report report.md --pr https://github.com/example-org/demo-board/pull/1",
       "foundry park i-0001",
       "foundry import fixtures/bookmarks.json",
+      "foundry import --from fixtures/x-bookmarks.json",
+      "foundry correct",
+      "foundry weekly --since 2026-10-24",
       "foundry seed",
       "foundry dashboard",
     ],
@@ -79,10 +88,17 @@ export async function main(argv: string[]): Promise<number> {
   }
   const [command, ...pos] = rest;
   const store = new Store(flags.data);
-  const planner = new FixturePlanner();
+  let planner;
+  try {
+    planner = selectPlanner(process.env, (path) => store.readText(path));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Bad planner.";
+    process.stdout.write(`${JSON.stringify({ ok: false, status: 400, error: "bad_planner", message, next: "Set FOUNDRY_PLANNER to fixture or agent." })}\n`);
+    return 1;
+  }
   if (command === "dashboard") {
     const { startServer } = await import("./server.js");
-    const port = Number(process.env.PORT ?? 4440);
+    const port = foundryPort();
     if (process.env.FOUNDRY_FRESH === "1") store.reset();
     const started = await startServer({ store, port, seed: process.env.FOUNDRY_SEED === "1" });
     process.stdout.write(`${JSON.stringify({ ok: true, dryRun: false, data: { url: started.url } })}\n`);
@@ -125,7 +141,11 @@ export async function main(argv: string[]): Promise<number> {
         result = park(store, pos[0] ?? "", flags.dryRun, flags.version);
         break;
       case "import": {
-        const file = pos[0];
+        const file = flags.from ?? pos[0];
+        if (flags.from) {
+          result = importBookmarks(store, store.readText(flags.from), planner, flags.dryRun);
+          break;
+        }
         if (!file) {
           result = {
             ok: false,
@@ -139,6 +159,22 @@ export async function main(argv: string[]): Promise<number> {
         result = importNotes(store, store.readText(file), planner, flags.dryRun);
         break;
       }
+      case "correct":
+        result = correct(store);
+        break;
+      case "weekly":
+        if (!flags.since) {
+          result = {
+            ok: false,
+            status: 400,
+            error: "bad_since",
+            message: "weekly needs a YYYY-MM-DD date.",
+            next: "Run `foundry weekly --since 2026-10-24`.",
+          };
+          break;
+        }
+        result = weekly(store, flags.since);
+        break;
       case "seed":
         if (flags.dryRun) {
           result = { ok: true, dryRun: true, data: { titles: SEED_TITLES } };

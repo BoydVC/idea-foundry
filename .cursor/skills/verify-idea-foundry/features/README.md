@@ -23,3 +23,5 @@ Drive the dashboard the way a person does. Read this index, then the feature fil
 - [stack-and-gates](stack-and-gates.md)
 - [draft-ingest](draft-ingest.md)
 - [lessons](lessons.md)
+- [packets](packets.md)
+- [weekly](weekly.md)

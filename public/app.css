@@ -27,7 +27,7 @@ button, input, select {
   color: inherit;
 }
 
-.top, .add, .banner, .health-wrap, .board, .detail, .chart-wrap, .lessons-wrap {
+.top, .add, .banner, .health-wrap, .board, .detail, .gates-wrap, .chart-wrap, .lessons-wrap {
   width: min(1180px, calc(100% - 32px));
   margin-left: auto;
   margin-right: auto;
@@ -143,7 +143,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .card strong { display: block; margin-top: 4px; font-size: 15px; line-height: 1.25; }
 
-.detail, .chart-wrap, .lessons-wrap, .health-wrap {
+.detail, .gates-wrap, .chart-wrap, .lessons-wrap, .health-wrap {
   margin-top: 18px;
   padding-top: 8px;
 }

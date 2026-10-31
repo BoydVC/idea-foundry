@@ -17,7 +17,9 @@ export default defineConfig({
       FOUNDRY_DATA: "data/e2e",
       FOUNDRY_FRESH: "1",
       FOUNDRY_SEED: "1",
+      FOUNDRY_PORT: "4440",
       PORT: "4440",
+      FOUNDRY_OPEN_DRAFTS: "0",
     },
   },
 });

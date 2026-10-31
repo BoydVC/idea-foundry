@@ -265,6 +265,14 @@ DropB ==
   /\ UNCHANGED <<idea, s1, s2, draft1, draft2, stored, commits, aRead, bRead, aDone, g1, g2>>
 
 
+\* event: done
+\* Stutter for end states so NoDeadlock holds. UNCHANGED vars, so this is not a chart edge.
+Done ==
+  /\ \/ idea \in {"rejected", "parked", "verified"}
+     \/ s1 \in {"rejected", "parked", "verified"}
+     \/ s2 \in {"rejected", "parked", "verified"}
+  /\ UNCHANGED vars
+
 \* Not a chart edge. Enabled only when SkipGate is true.
 SkipGateDispatch ==
   /\ SkipGate
@@ -328,6 +336,7 @@ Next ==
   \/ CommitB
   \/ DropA
   \/ DropB
+  \/ Done
   \/ SkipGateDispatch
   \/ MergeSpec
   \/ DoubleCommit

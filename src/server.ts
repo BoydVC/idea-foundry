@@ -15,7 +15,8 @@ import {
 } from "./commands.js";
 import { DomainError, prUrl } from "./domain.js";
 import { pipelineHealth } from "./health.js";
-import { FixturePlanner } from "./planner.js";
+import { foundryPort } from "./port.js";
+import { selectPlanner } from "./planners/llm.js";
 import { renderReport } from "./packet.js";
 import { Store } from "./store.js";
 import { mermaid, edgesFromTla } from "./statechart.js";
@@ -72,7 +73,7 @@ export type Running = { server: Server; port: number; url: string };
 
 export async function startServer(options: { store: Store; port: number; seed?: boolean; host?: string }): Promise<Running> {
   const store = options.store;
-  const planner = new FixturePlanner();
+  const planner = selectPlanner(process.env, (path) => store.readText(path));
   const host = options.host ?? "127.0.0.1";
   if (options.seed && store.load().ideas.length === 0) seedDemo(store, planner);
 
@@ -198,7 +199,7 @@ if (calledDirectly) {
   if (process.env.FOUNDRY_FRESH === "1") store.reset();
   const running = await startServer({
     store,
-    port: Number(process.env.PORT ?? 4440),
+    port: foundryPort(),
     seed: process.env.FOUNDRY_SEED === "1",
   });
   process.stdout.write(`${JSON.stringify({ ok: true, data: { url: running.url } })}\n`);

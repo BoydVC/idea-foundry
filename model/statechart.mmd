@@ -1,19 +1,28 @@
 stateDiagram-v2
   [*] --> raw
-  approved --> specced: decompose
-  approved --> parked: park
-  dispatched --> parked: park
-  dispatched --> rejected: reject
-  dispatched --> verified: verify
-  gated --> verified: close
-  gated --> dispatched: dispatch
-  gated --> specced: gate_fail
-  gated --> parked: park
-  raw --> parked: park
-  raw --> restated: restate
-  restated --> approved: approve
-  restated --> parked: park
-  specced --> gated: gate_pass
-  specced --> parked: park
-  verified --> gated: reopen
-  verified --> dispatched: unverify
+  state "Raw idea" as raw
+  state "Restated in our words" as restated
+  state "Approved to build" as approved
+  state "Specs written" as specced
+  state "Gates passed" as gated
+  state "Sent to a runner" as dispatched
+  state "Draft verified" as verified
+  state "Rejected" as rejected
+  state "Parked" as parked
+  approved --> specced: the idea becomes specs
+  approved --> parked: you park it
+  dispatched --> parked: you park it
+  dispatched --> rejected: the runner rejects it
+  dispatched --> verified: the draft checks out
+  gated --> verified: every spec is verified
+  gated --> dispatched: you send a draft packet
+  gated --> specced: a gate fails
+  gated --> parked: you park it
+  raw --> parked: you park it
+  raw --> restated: you restate the idea
+  restated --> approved: you approve the smallest slice
+  restated --> parked: you park it
+  specced --> gated: the gates pass
+  specced --> parked: you park it
+  verified --> gated: the idea opens again
+  verified --> dispatched: the draft is no longer a draft

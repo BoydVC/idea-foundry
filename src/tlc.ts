@@ -42,8 +42,14 @@ function withTlcLock<T>(body: () => T): T {
   return body();
 }
 
+function javaOnPath(): boolean {
+  const ran = spawnSync("java", ["-version"], { encoding: "utf8" });
+  return ran.status === 0;
+}
+
 export function checkFoundryModel(): { ok: boolean; detail: string } {
   if (cached) return cached;
+  if (!javaOnPath()) return { ok: false, detail: "Java is not on PATH. TLC did not run. Install a JDK 21." };
   if (!jarReady()) return { ok: false, detail: "tla2tools.jar is not available." };
   return withTlcLock(() => {
     if (cached) return cached;
