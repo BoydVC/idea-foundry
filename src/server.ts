@@ -121,7 +121,28 @@ export async function startServer(options: { store: Store; port: number; seed?: 
       }
       if (req.method === "POST" && url.pathname === "/api/idea") {
         const body = await readBody(req);
-        send(res, 200, createIdea(store, String(body.title ?? ""), false));
+        const unknown = Object.keys(body).filter((key) => key !== "title" && key !== "allowDuplicate");
+        if (unknown.length > 0) {
+          send(res, 400, {
+            ok: false,
+            status: 400,
+            error: "bad_request",
+            message: "The request has an unknown field.",
+            next: "Send a JSON object with a title.",
+          });
+          return;
+        }
+        if (typeof body.title !== "string") {
+          send(res, 400, {
+            ok: false,
+            status: 400,
+            error: "bad_title",
+            message: "The title must be a string.",
+            next: "Send {\"title\":\"habit tracker export\"}.",
+          });
+          return;
+        }
+        send(res, 200, createIdea(store, body.title, false, { allowDuplicate: body.allowDuplicate === true }));
         return;
       }
       const ideaAction = url.pathname.match(/^\/api\/idea\/(i-\d{4})\/(restate|approve|decompose|gate|park)$/);
@@ -179,7 +200,7 @@ export async function startServer(options: { store: Store; port: number; seed?: 
       }
       send(res, 404, { ok: false, status: 404, error: "not_found", message: "No such route.", next: "Use /api/state, /api/statechart, or /api/idea." });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Request failed.";
+      const message = error instanceof SyntaxError ? "The request body is not valid JSON." : error instanceof Error ? error.message : "Request failed.";
       send(res, 400, { ok: false, status: 400, error: "bad_request", message, next: "Send a JSON object and retry." });
     }
   });

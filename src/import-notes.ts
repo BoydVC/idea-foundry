@@ -104,51 +104,73 @@ export type XBookmark = {
   date: string;
 };
 
-function bookmarkRow(row: unknown): XBookmark {
-  if (!row || typeof row !== "object" || Array.isArray(row)) {
-    throw new DomainError("bad_import", "Each bookmark must be an object.", "Use {id, author, text, date}.");
-  }
-  const record = row as Record<string, unknown>;
-  const id = record.id;
-  const author = record.author;
-  const text = record.text;
-  const date = record.date;
-  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(id)) {
-    throw new DomainError("bad_import", "Each bookmark needs an id.", "Use a short id such as bk-habit.");
-  }
-  if (typeof author !== "string" || author.trim() === "" || author.length > 80) {
-    throw new DomainError("bad_import", "Each bookmark needs an author string.", "Use a synthetic author label.");
-  }
-  if (typeof text !== "string" || text.trim() === "" || text.length > 500) {
-    throw new DomainError("bad_import", "Each bookmark needs a text string.", "Keep the text under 500 characters.");
-  }
-  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw new DomainError("bad_import", "Each bookmark needs a YYYY-MM-DD date.", "Use a synthetic date such as 2026-10-20.");
-  }
-  return { id, author: author.trim(), text: text.replace(/\s+/g, " ").trim(), date };
+export type InvalidBookmark = {
+  index: number;
+  id?: string;
+  message: string;
+  next: string;
+};
+
+function rowProblem(index: number, id: string | undefined, message: string, next: string): InvalidBookmark {
+  return { index, id, message: `Row ${index}: ${message}`, next };
 }
 
-export function parseBookmarkExport(text: string): XBookmark[] {
+function bookmarkRow(row: unknown, index: number): { ok: true; value: XBookmark } | { ok: false; error: InvalidBookmark } {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    return { ok: false, error: rowProblem(index, undefined, "the bookmark must be an object.", "Use {id, author, text, date}.") };
+  }
+  const record = row as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id : undefined;
+  const text = record.text;
+  if (typeof text !== "string" || text.trim() === "") {
+    return { ok: false, error: rowProblem(index, id, "the bookmark needs a text string.", "Add text for that bookmark.") };
+  }
+  if (text.length > 500) {
+    return { ok: false, error: rowProblem(index, id, "the bookmark text is too long.", "Keep the text under 500 characters.") };
+  }
+  if (typeof record.id !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(record.id)) {
+    return { ok: false, error: rowProblem(index, id, "the bookmark needs an id.", "Use a short id such as bk-habit.") };
+  }
+  if (typeof record.author !== "string" || record.author.trim() === "" || record.author.length > 80) {
+    return { ok: false, error: rowProblem(index, record.id, "the bookmark needs an author string.", "Use a synthetic author label.") };
+  }
+  if (typeof record.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) {
+    return { ok: false, error: rowProblem(index, record.id, "the bookmark needs a YYYY-MM-DD date.", "Use a synthetic date such as 2026-10-20.") };
+  }
+  return {
+    ok: true,
+    value: { id: record.id, author: record.author.trim(), text: text.replace(/\s+/g, " ").trim(), date: record.date },
+  };
+}
+
+export function parseBookmarkExport(text: string): { rows: (XBookmark & { index: number })[]; invalid: InvalidBookmark[] } {
   const trimmed = text.trim();
-  if (trimmed.length === 0) return [];
+  if (trimmed.length === 0) return { rows: [], invalid: [] };
   if (trimmed.length > 256_000) {
     throw new DomainError("bad_import", "The import file is too large.", "Split the file and import the pieces.");
   }
-  let parsed: unknown;
+  let payload: unknown;
   try {
-    parsed = JSON.parse(trimmed);
+    payload = JSON.parse(trimmed);
   } catch {
     throw new DomainError("bad_import", "The bookmark export is not valid JSON.", "Pass a JSON file of {id, author, text, date} rows.");
   }
-  const rows = Array.isArray(parsed)
-    ? parsed
-    : parsed && typeof parsed === "object" && Array.isArray((parsed as { bookmarks?: unknown }).bookmarks)
-      ? (parsed as { bookmarks: unknown[] }).bookmarks
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && Array.isArray((payload as { bookmarks?: unknown }).bookmarks)
+      ? (payload as { bookmarks: unknown[] }).bookmarks
       : null;
   if (!rows) {
     throw new DomainError("bad_import", "The bookmark export needs a list of {id, author, text, date}.", "Use fixtures/x-bookmarks.json as the shape.");
   }
-  return rows.map(bookmarkRow);
+  const kept: (XBookmark & { index: number })[] = [];
+  const invalid: InvalidBookmark[] = [];
+  rows.forEach((row, offset) => {
+    const result = bookmarkRow(row, offset + 1);
+    if (result.ok) kept.push({ ...result.value, index: offset + 1 });
+    else invalid.push(result.error);
+  });
+  return { rows: kept, invalid };
 }
 
 export function parseImportFile(text: string): ImportNote[] {

@@ -14,18 +14,22 @@ type Flags = {
   from?: string;
   since?: string;
   draft?: boolean;
+  allowDuplicate: boolean;
+  fresh: boolean;
   version?: number;
   help: boolean;
 };
 
 function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
-  const flags: Flags = { dryRun: false, data: process.env.FOUNDRY_DATA ?? "data", help: false };
+  const flags: Flags = { dryRun: false, data: process.env.FOUNDRY_DATA ?? "data", help: false, allowDuplicate: false, fresh: false };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--dry-run") flags.dryRun = true;
     else if (arg === "--help" || arg === "-h") flags.help = true;
     else if (arg === "--draft") flags.draft = true;
+    else if (arg === "--allow-duplicate") flags.allowDuplicate = true;
+    else if (arg === "--fresh") flags.fresh = true;
     else if (arg === "--no-draft") flags.draft = false;
     else if (arg === "--version" || arg === "--record-version") {
       const value = argv[i + 1];
@@ -53,6 +57,8 @@ const HELP = {
   data: {
     usage: [
       "foundry idea \"habit tracker export\"",
+      "foundry idea \"habit tracker export\" --allow-duplicate",
+      "foundry seed --fresh",
       "foundry restate i-0001",
       "foundry approve i-0001 --note \"Ship the smallest slice\"",
       "foundry decompose i-0001",
@@ -109,7 +115,7 @@ export async function main(argv: string[]): Promise<number> {
   try {
     switch (command) {
       case "idea":
-        result = createIdea(store, pos.join(" "), flags.dryRun);
+        result = createIdea(store, pos.join(" "), flags.dryRun, { allowDuplicate: flags.allowDuplicate });
         break;
       case "restate":
         result = restate(store, pos[0] ?? "", planner, flags.dryRun, flags.version);
@@ -176,11 +182,11 @@ export async function main(argv: string[]): Promise<number> {
         result = weekly(store, flags.since);
         break;
       case "seed":
-        if (flags.dryRun) {
+        if (flags.dryRun && (flags.fresh || store.load().ideas.length === 0)) {
           result = { ok: true, dryRun: true, data: { titles: SEED_TITLES } };
           break;
         }
-        result = seedDemo(store, planner);
+        result = seedDemo(store, planner, { fresh: flags.fresh });
         break;
       default:
         result = { ok: false, status: 400, error: "unknown_command", message: `Unknown command ${command}.`, next: "Run `foundry --help`." };

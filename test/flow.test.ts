@@ -108,11 +108,12 @@ describe("foundry flow", () => {
     expect(blocked.ok).toBe(false);
     if (blocked.ok) return;
     expect(blocked.error).toBe("stack_order");
+    const offline = () => ({ ok: false as const, warning: "GitHub API was unreachable. Using the report line." });
     const published = ingest(
       store,
       bottom.id,
       ["---", "verdict: verified", "draft: false", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "note"].join("\n"),
-      {},
+      { probe: offline },
       false,
     );
     expect(published.ok).toBe(false);
@@ -123,7 +124,7 @@ describe("foundry flow", () => {
       store,
       bottom.id,
       ["---", "verdict: verified", "draft: true", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "Synthetic note."].join("\n"),
-      {},
+      { probe: offline },
       false,
     );
     expect(verified.ok).toBe(true);
@@ -133,7 +134,7 @@ describe("foundry flow", () => {
       store,
       bottom.id,
       ["---", "verdict: verified", "draft: true", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "Synthetic note."].join("\n"),
-      {},
+      { probe: offline },
       false,
     );
     expect(repeat.ok).toBe(true);

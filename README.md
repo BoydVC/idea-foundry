@@ -8,7 +8,7 @@ Idea Foundry turns one raw idea into an ordered stack of small specs, runs the s
 - JDK 21 on `PATH` as `java`, for `npm run tlc` and `npm run tlc:mutant`. When `java` is missing outside CI, those commands print `SKIP: Java is not on PATH` and exit 0. CI treats a missing JDK as an error.
 - `tesseract` and `ffmpeg`, for `npm run pii` (it OCRs `screenshots/demo.gif`) and for `scripts/record-demo.ts` (it rebuilds that gif from the recorded video). A missing tool exits with a JSON error that names the tool and these prerequisites.
 
-`foundry dispatch` reads open draft pull requests for the target repo and refuses with status 409 when that count is above 10. Set `FOUNDRY_OPEN_DRAFTS` only in tests and the local demo. An unreachable GitHub API prints a warning and still dispatches.
+`foundry dispatch` reads open draft pull requests for the target repo and refuses with status 409 when that count is above 10. Set `FOUNDRY_OPEN_DRAFTS` only in tests and the local demo. An unreachable GitHub API prints a warning and still dispatches. Ingest treats HTTP 404, 401, and 403 as a refusal and does not verify from the report. Only a real network failure falls back to the report line. The demo and Playwright set `FOUNDRY_GITHUB_DRAFT=offline` so a synthetic pull request can still be ingested.
 
 ## Run the pipeline
 
@@ -58,7 +58,7 @@ npm run foundry -- weekly --since 2026-10-24
 npm run foundry -- correct
 ```
 
-`FOUNDRY_PLANNER=fixture` (the default) is the offline planner. `FOUNDRY_PLANNER=agent` restates in its own words and sketches types and signatures. Point `FOUNDRY_PLANNER_RECORD` at a JSON file to replay a recorded response. `FOUNDRY_PORT` chooses the dashboard port. `foundry correct` writes lesson proposals under the data directory and does not apply them. `foundry weekly` prints ideas moved, specs verified, open draft pull requests, and dispatched specs older than 7 days.
+`FOUNDRY_PLANNER=fixture` (the default) is the offline planner. `FOUNDRY_PLANNER=agent` restates in its own words and sketches types and signatures. Point `FOUNDRY_PLANNER_RECORD` at a JSON file to replay a recorded response. `FOUNDRY_PORT` chooses the dashboard port. `foundry correct` writes lesson proposals under the data directory and does not apply them. `foundry weekly` prints ideas moved, specs verified, `localDraftPrs` for this store, `targetOpenDrafts` for the target repo, and dispatched specs older than 7 days. `foundry idea` warns when the title matches an idea already on the board; pass `--allow-duplicate` to skip the warning. `foundry seed` refuses a store that already has ideas unless you pass `--fresh`.
 
 ## Checks
 

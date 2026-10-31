@@ -388,11 +388,20 @@ export function prUrl(raw: string): PrUrl {
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 
+export function normalizeTitle(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function parseTitle(raw: unknown): string {
-  if (typeof raw !== "string" || raw.trim().length === 0 || raw.length > 200 || /[\r\n]/.test(raw)) {
+  if (typeof raw !== "string" || raw.trim().length < 2 || raw.length > 200 || /[\r\n]/.test(raw)) {
     throw new DomainError(
       "bad_title",
-      "The title must be one non-empty line of at most 200 characters.",
+      "The title must be one line of 2 to 200 characters.",
       "Try `foundry idea \"habit tracker export\"`.",
     );
   }

@@ -99,6 +99,16 @@ function renderBoard(state) {
       });
       card.append(el("span", { class: "id", text: idea.id }));
       card.append(el("strong", { text: idea.title }));
+      const specs = specsFor(state, idea);
+      const verified = specs.filter((spec) => spec.state === "verified").length;
+      const rejected = specs.filter((spec) => spec.state === "rejected").length;
+      card.append(
+        el("span", {
+          class: "id",
+          "data-testid": `idea-outcome-${idea.id}`,
+          text: specs.length === 0 ? idea.state : `${idea.state} · ${verified} verified · ${rejected} rejected`,
+        }),
+      );
       card.addEventListener("click", () => {
         selected = idea.id;
         renderBoard(state);
@@ -235,7 +245,9 @@ function renderHealth(health) {
       return `${id} ${label}`;
     })
     .join(" · ");
-  const mean = pipe.meanMinutesIdeaToVerified === null ? "n/a" : `${pipe.meanMinutesIdeaToVerified} min`;
+  const meanValue = pipe.meanMinutesIdeaToVerified ?? pipe.meanMinutesSpecToVerified;
+  const mean = meanValue === null || meanValue === undefined ? "n/a" : `${meanValue} min`;
+  const specResults = `verified ${pipe.specsVerified || 0} · rejected ${pipe.specsRejected || 0}`;
   const card = (title, node) => {
     const article = el("article");
     article.append(el("h3", { text: title }));
@@ -245,7 +257,8 @@ function renderHealth(health) {
   root.append(
     card("Ideas by state", states),
     card("Gate pass rates", el("p", { text: rates, "data-testid": "health-gates" })),
-    card("Mean time idea to verified", el("p", { text: mean, "data-testid": "health-mean" })),
+    card("Mean time to verified", el("p", { text: mean, "data-testid": "health-mean" })),
+    card("Spec results", el("p", { text: specResults, "data-testid": "health-spec-results" })),
     card("Lessons promoted", el("p", { text: String(pipe.lessonsPromoted), "data-testid": "health-lessons" })),
   );
 }

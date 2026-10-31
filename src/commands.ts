@@ -10,6 +10,7 @@ import {
   hasRestatement,
   ideaIdFromCounter,
   lessonIdFromCounter,
+  normalizeTitle,
   parseIdea,
   parseLesson,
   parseSpec,
@@ -187,8 +188,14 @@ function recordFindings(snap: Snapshot, findings: readonly Finding[], now: strin
   return { ...snap, findingCounts: counts, lessons, nextLesson };
 }
 
-export function createIdea(store: Store, title: string, dryRun: boolean): CommandResult {
+function duplicateTitle(ideas: readonly { title: string }[], title: string): boolean {
+  const key = normalizeTitle(title);
+  return key.length > 0 && ideas.some((idea) => normalizeTitle(idea.title) === key);
+}
+
+export function createIdea(store: Store, title: string, dryRun: boolean, options?: { allowDuplicate?: boolean }): CommandResult {
   let clean: string;
+  let warning: string | undefined;
   try {
     const snap = store.load();
     const preview = parseIdea({
@@ -201,7 +208,10 @@ export function createIdea(store: Store, title: string, dryRun: boolean): Comman
       updatedAt: store.now(),
     });
     clean = preview.title;
-    if (dryRun) return ok(preview, { dryRun: true });
+    if (duplicateTitle(snap.ideas, clean) && !options?.allowDuplicate) {
+      warning = `An idea already uses the title "${clean}". Pass --allow-duplicate to hide this warning.`;
+    }
+    if (dryRun) return ok(preview, { dryRun: true, warning });
   } catch (error) {
     return fromThrown(error);
   }
@@ -218,7 +228,9 @@ export function createIdea(store: Store, title: string, dryRun: boolean): Comman
       });
       return { ...snap, nextIdea: snap.nextIdea + 1, ideas: [...snap.ideas, idea] };
     });
-    return fromStore(saved, (snap) => snap.ideas[snap.ideas.length - 1]);
+    const result = fromStore(saved, (snap) => snap.ideas[snap.ideas.length - 1]);
+    if (result.ok && warning) return { ...result, warning };
+    return result;
   } catch (error) {
     return fromThrown(error);
   }
@@ -647,6 +659,30 @@ function githubStatus(warning: string | undefined): number {
   return warning !== undefined && /rate limit/i.test(warning) ? 429 : 502;
 }
 
+function withheldResult(decided: { warning?: string; message: string; next: string; code?: string }): CommandErr {
+  if (decided.code === "pr_not_found") return fail(404, "pr_not_found", decided.message, decided.next, decided.warning);
+  if (decided.code === "probe_auth") return fail(401, "probe_auth", decided.message, decided.next, decided.warning);
+  return fail(githubStatus(decided.warning), "github_unavailable", decided.message, decided.next, decided.warning);
+}
+
+export function rejectionKey(reason: string): string {
+  const slug = reason
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+  return `g3:reject-${slug.length > 0 ? slug : "report"}`;
+}
+
+function recordRejection(snap: Snapshot, reason: string, now: string): Snapshot {
+  const key = rejectionKey(reason);
+  const detail = reason;
+  const count = snap.findingCounts[key] ?? 0;
+  const needed = count >= 2 ? 1 : 2 - count;
+  const findings = Array.from({ length: needed }, () => ({ key, detail, proof: 2 as const }));
+  return recordFindings(snap, findings, now);
+}
+
 export function ingest(
   store: Store,
   id: string,
@@ -665,13 +701,21 @@ export function ingest(
     return fromThrown(error);
   }
   const reportDraft = overrides.draft === false || report.draft === false ? false : overrides.draft === true || report.draft;
+  if (overrides.pr && report.pr && overrides.pr !== report.pr) {
+    return fail(
+      422,
+      "pr_mismatch",
+      `The --pr URL does not match the report pr line (${report.pr}).`,
+      "Pass the same pull request URL in --pr and in the report.",
+    );
+  }
   const prRaw = overrides.pr ?? report.pr;
   if (spec.state === "verified") {
     if (typeof prRaw === "string" && prRaw.length > 0 && prRaw !== spec.prUrl) {
       return fail(422, "pr_mismatch", `This spec is verified at ${spec.prUrl}.`, "Re-ingest that pull request, not a different URL.");
     }
     const decided = resolveDraftStatus(reportDraft, spec.prUrl, overrides.probe ?? lookupGithubDraft);
-    if (decided.withheld) return fail(githubStatus(decided.warning), "github_unavailable", decided.message, decided.next, decided.warning);
+    if (decided.withheld) return withheldResult(decided);
     if (decided.draft) return ok(spec, { idempotent: true, dryRun, warning: decided.warning });
     if (decided.warning) return fail(422, "not_draft", decided.message, decided.next, decided.warning);
     return unverify(store, spec, decided, dryRun);
@@ -692,7 +736,7 @@ export function ingest(
     }
   }
   const decided = resolveDraftStatus(reportDraft, typeof prRaw === "string" ? prRaw : undefined, overrides.probe ?? lookupGithubDraft);
-  if (decided.withheld) return fail(githubStatus(decided.warning), "github_unavailable", decided.message, decided.next, decided.warning);
+  if (decided.withheld) return withheldResult(decided);
   if (!decided.draft) {
     return fail(422, "not_draft", decided.message, decided.next, decided.warning);
   }
@@ -754,7 +798,9 @@ export function ingest(
           ideas = ideas.map((item) => (item.id === closed.id ? closed : item));
         }
       }
-      return { ...current, ideas, specs: current.specs.map((item) => (item.id === written.id ? written : item)) };
+      const base = { ...current, ideas, specs: current.specs.map((item) => (item.id === written.id ? written : item)) };
+      if (written.state !== "rejected") return base;
+      return recordRejection(base, report.body || "Rejected by the report.", store.now());
     });
     const savedResult = fromStore(saved, (value) => ({
       spec: value.specs.find((item) => item.id === spec.id),
@@ -834,41 +880,74 @@ export function importNotes(store: Store, text: string, planner: Planner, dryRun
   return ok({ count: saved.length, ideas: saved });
 }
 
+export type SkippedImport = { index: number; id?: string; reason: string; message: string; next: string };
+
 export function importBookmarks(store: Store, text: string, planner: Planner, dryRun: boolean): CommandResult {
-  let rows;
+  let parsed;
   try {
-    rows = parseBookmarkExport(text);
+    parsed = parseBookmarkExport(text);
   } catch (error) {
     return fromThrown(error);
   }
-  if (rows.length === 0) {
+  if (parsed.rows.length === 0 && parsed.invalid.length === 0) {
     return fail(400, "empty_import", "The bookmark file has no rows.", "Add id, author, text, and date, then import again.");
   }
-  const seen = new Set(store.load().seenBookmarkIds);
-  const fresh: typeof rows = [];
-  const batch = new Set<string>();
-  for (const row of rows) {
-    if (seen.has(row.id) || batch.has(row.id)) continue;
-    batch.add(row.id);
+  const snap = store.load();
+  const seen = new Set(snap.seenBookmarkIds);
+  const titles = new Set(snap.ideas.map((idea) => normalizeTitle(idea.title)));
+  const batchIds = new Set<string>();
+  const batchText = new Set<string>();
+  const skipped: SkippedImport[] = parsed.invalid.map((item) => ({
+    index: item.index,
+    id: item.id,
+    reason: "invalid-row",
+    message: item.message,
+    next: item.next,
+  }));
+  const fresh: typeof parsed.rows = [];
+  for (const row of parsed.rows) {
+    const index = row.index;
+    if (seen.has(row.id) || batchIds.has(row.id)) {
+      skipped.push({ index, id: row.id, reason: "duplicate-id", message: `Row ${index}: bookmark ${row.id} was already imported.`, next: "Skip that id, or import a new bookmark." });
+      continue;
+    }
+    const key = normalizeTitle(row.text);
+    if (titles.has(key)) {
+      skipped.push({ index, id: row.id, reason: "duplicate-title", message: `Row ${index}: the text matches an idea already on the board.`, next: "Change the text, or leave the existing idea." });
+      continue;
+    }
+    if (batchText.has(key)) {
+      skipped.push({ index, id: row.id, reason: "duplicate-text", message: `Row ${index}: the text repeats an earlier row.`, next: "Keep one row for that text." });
+      continue;
+    }
+    batchIds.add(row.id);
+    batchText.add(key);
     fresh.push(row);
   }
-  if (dryRun) return ok({ count: fresh.length, skipped: rows.length - fresh.length }, { dryRun: true });
+  skipped.sort((a, b) => a.index - b.index);
+  if (dryRun) return ok({ count: fresh.length, skipped }, { dryRun: true });
   const saved: unknown[] = [];
   for (const row of fresh) {
-    const made = createIdea(store, row.text, false);
-    if (!made.ok) return made;
+    let title = row.text;
+    if (title.length > 200) title = title.slice(0, 200).trimEnd();
+    const made = createIdea(store, title, false, { allowDuplicate: true });
+    if (!made.ok) {
+      skipped.push({ index: 0, id: row.id, reason: "invalid-row", message: made.message, next: made.next });
+      continue;
+    }
     const idea = made.data as Idea;
-    const drafted = draftOf(row.text, row.text);
+    const drafted = draftOf(title, row.text);
     const restated = restate(store, idea.id, planner, false, idea.version, drafted);
     if (!restated.ok) return restated;
-    const remembered = store.transact({ ideas: [], specs: [] }, (snap) => {
-      if (snap.seenBookmarkIds.includes(row.id)) return snap;
-      return { ...snap, seenBookmarkIds: [...snap.seenBookmarkIds, row.id] };
+    const remembered = store.transact({ ideas: [], specs: [] }, (current) => {
+      if (current.seenBookmarkIds.includes(row.id)) return current;
+      return { ...current, seenBookmarkIds: [...current.seenBookmarkIds, row.id] };
     });
     if (!remembered.ok) return remembered;
     saved.push(restated.data);
+    titles.add(normalizeTitle(title));
   }
-  return ok({ count: saved.length, skipped: rows.length - fresh.length, ideas: saved }, { idempotent: saved.length === 0 });
+  return ok({ count: saved.length, skipped, ideas: saved }, { idempotent: saved.length === 0 });
 }
 
 function proposalBody(lesson: { key: string; detail: string; promotedTo: string }): string {
@@ -920,7 +999,12 @@ export function weekly(store: Store, since: string): CommandResult {
     return fail(400, "bad_since", "weekly needs a YYYY-MM-DD date.", "Run `foundry weekly --since 2026-10-24`.");
   }
   try {
-    return ok(weeklyDigest(store.load(), since));
+    const target = process.env.FOUNDRY_TARGET ?? DEFAULT_TARGET;
+    const backlog = draftBacklogFromEnv()(target);
+    const targetOpenDrafts = backlog.ok ? backlog.drafts : null;
+    const result = ok(weeklyDigest(store.load(), since, targetOpenDrafts));
+    if (!backlog.ok) return { ...result, warning: backlog.warning };
+    return result;
   } catch (error) {
     return fromThrown(error);
   }
@@ -936,7 +1020,16 @@ export function noteFinding(store: Store, key: string, detail: string): CommandR
   }
 }
 
-export function seedDemo(store: Store, planner: Planner): CommandResult {
+export function seedDemo(store: Store, planner: Planner, options?: { fresh?: boolean }): CommandResult {
+  if (!options?.fresh && store.load().ideas.length > 0) {
+    return fail(
+      409,
+      "store_not_empty",
+      "The data directory already has ideas.",
+      "Pass --fresh to replace this store, or choose an empty --data directory.",
+    );
+  }
+  if (options?.fresh) store.reset();
   const created = [];
   for (const title of SEED_TITLES) {
     const made = createIdea(store, title, false);

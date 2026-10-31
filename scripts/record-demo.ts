@@ -21,6 +21,7 @@ export function writeDemoGif(videoPath: string, gifPath: string): void {
 
 async function main(): Promise<void> {
 if (!process.env.FOUNDRY_OPEN_DRAFTS) process.env.FOUNDRY_OPEN_DRAFTS = "0";
+if (!process.env.FOUNDRY_GITHUB_DRAFT) process.env.FOUNDRY_GITHUB_DRAFT = "offline";
 ensureDraftDay();
 
 const store = new Store("data/demo");
@@ -62,8 +63,9 @@ try {
   await page.screenshot({ path: "screenshots/02-stack.png" });
 
   await page.getByTestId("action-gate").click();
-  await page.getByTestId("gate-s-0006-1-G1").waitFor();
-  await pause(900);
+  await page.getByTestId("panel-s-0006-1-G0").waitFor();
+  await page.getByTestId("gates-panel").scrollIntoViewIfNeeded();
+  await pause(1600);
   await page.screenshot({ path: "screenshots/03-gates.png" });
 
   const count = await page.locator('[data-testid^="spec-s-0006-"]').count();

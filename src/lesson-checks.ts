@@ -47,6 +47,7 @@ export function lessonFindings(
 ): Finding[] {
   const findings: Finding[] = [];
   for (const lesson of lessons) {
+    if (lesson.key.startsWith("g3:reject-")) continue;
     const check = LESSON_CHECKS[lesson.key];
     if (!check) {
       findings.push({

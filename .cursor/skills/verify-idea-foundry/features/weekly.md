@@ -4,7 +4,7 @@
 
 ## Sub-features
 
-- counts: JSON fields `ideasMoved`, `specsVerified`, `openDraftPrs`, and `staleDispatched`.
+- counts: JSON fields `ideasMoved`, `specsVerified`, `localDraftPrs`, `targetOpenDrafts`, and `staleDispatched`. `localDraftPrs` counts draft proofs in this store. `targetOpenDrafts` is the target repo's open draft count from GitHub, or null when GitHub cannot be reached.
 - bookmarks: `foundry import --from` dedupes a bookmark export by id.
 
 ## How to get to it (user POV)

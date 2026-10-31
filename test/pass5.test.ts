@@ -94,11 +94,19 @@ describe("pass 5", () => {
     expect(runCli(dir, ["seed"]).json.ok).toBe(true);
     const report = runCli(dir, ["weekly", "--since", "2026-10-24"]).json;
     expect(report.ok).toBe(true);
-    const data = report.data as { since: string; ideasMoved: number; specsVerified: number; openDraftPrs: number; staleDispatched: number };
+    const data = report.data as {
+      since: string;
+      ideasMoved: number;
+      specsVerified: number;
+      localDraftPrs: number;
+      targetOpenDrafts: number | null;
+      staleDispatched: number;
+    };
     expect(data.since).toBe("2026-10-24");
     expect(data.ideasMoved).toBeGreaterThan(0);
     expect(data.specsVerified).toBe(0);
-    expect(data.openDraftPrs).toBe(0);
+    expect(data.localDraftPrs).toBe(0);
+    expect(data.targetOpenDrafts).toBe(0);
     expect(data.staleDispatched).toBe(0);
     const stale = weeklyDigest(
       {
@@ -111,7 +119,8 @@ describe("pass 5", () => {
       "2026-10-24",
     );
     expect(stale.staleDispatched).toBe(1);
-    expect(stale.openDraftPrs).toBe(1);
+    expect(stale.localDraftPrs).toBe(1);
+    expect(stale.targetOpenDrafts).toBeNull();
     expect(stale.specsVerified).toBe(0);
     const store = tempStore();
     expect(seedDemo(store, planner).ok).toBe(true);

@@ -20,6 +20,7 @@ export default defineConfig({
       FOUNDRY_PORT: "4440",
       PORT: "4440",
       FOUNDRY_OPEN_DRAFTS: "0",
+      FOUNDRY_GITHUB_DRAFT: "offline",
     },
   },
 });

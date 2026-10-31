@@ -10,6 +10,9 @@ export type PipelineHealth = {
   ideasByState: Record<Phase, number>;
   gatePassRates: Record<GateId, GateRate>;
   meanMinutesIdeaToVerified: number | null;
+  meanMinutesSpecToVerified: number | null;
+  specsVerified: number;
+  specsRejected: number;
   lessonsPromoted: number;
 };
 
@@ -23,7 +26,7 @@ function round1(value: number): number {
 
 export function pipelineHealth(snap: {
   ideas: readonly { state: Phase; createdAt: string; updatedAt: string }[];
-  specs: readonly { gates: readonly { gate: GateId; pass: boolean }[] }[];
+  specs: readonly { state?: string; createdAt?: string; updatedAt?: string; gates: readonly { gate: GateId; pass: boolean }[] }[];
   lessons: readonly unknown[];
 }): PipelineHealth {
   const ideasByState = Object.fromEntries(PHASES.map((phase) => [phase, 0])) as Record<Phase, number>;
@@ -52,10 +55,28 @@ export function pipelineHealth(snap: {
   const meanMinutesIdeaToVerified =
     minutes.length === 0 ? null : round1(minutes.reduce((sum, value) => sum + value, 0) / minutes.length);
 
+  let specsVerified = 0;
+  let specsRejected = 0;
+  const specMinutes: number[] = [];
+  for (const spec of snap.specs) {
+    if (spec.state === "verified") specsVerified += 1;
+    if (spec.state === "rejected") specsRejected += 1;
+    if (spec.state !== "verified" || spec.createdAt === undefined || spec.updatedAt === undefined) continue;
+    const start = Date.parse(spec.createdAt);
+    const end = Date.parse(spec.updatedAt);
+    if (Number.isNaN(start) || Number.isNaN(end)) continue;
+    specMinutes.push((end - start) / 60000);
+  }
+  const meanMinutesSpecToVerified =
+    specMinutes.length === 0 ? null : round1(specMinutes.reduce((sum, value) => sum + value, 0) / specMinutes.length);
+
   return {
     ideasByState,
     gatePassRates,
     meanMinutesIdeaToVerified,
+    meanMinutesSpecToVerified,
+    specsVerified,
+    specsRejected,
     lessonsPromoted: snap.lessons.length,
   };
 }
@@ -64,7 +85,8 @@ export type WeeklyReport = {
   since: string;
   ideasMoved: number;
   specsVerified: number;
-  openDraftPrs: number;
+  localDraftPrs: number;
+  targetOpenDrafts: number | null;
   staleDispatched: number;
 };
 
@@ -76,6 +98,7 @@ export function weeklyDigest(
     specs: readonly { state: string; updatedAt: string; draft?: boolean }[];
   },
   since: string,
+  targetOpenDrafts: number | null = null,
 ): WeeklyReport {
   const start = Date.parse(`${since}T00:00:00.000Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(since) || Number.isNaN(start)) {
@@ -88,13 +111,13 @@ export function weeklyDigest(
     if (idea.state !== "raw" && !Number.isNaN(updated) && updated >= start) ideasMoved += 1;
   }
   let specsVerified = 0;
-  let openDraftPrs = 0;
+  let localDraftPrs = 0;
   let staleDispatched = 0;
   for (const spec of snap.specs) {
     const updated = Date.parse(spec.updatedAt);
-    if (spec.state === "verified" && spec.draft === true) openDraftPrs += 1;
+    if (spec.state === "verified" && spec.draft === true) localDraftPrs += 1;
     if (spec.state === "verified" && !Number.isNaN(updated) && updated >= start) specsVerified += 1;
     if (spec.state === "dispatched" && !Number.isNaN(updated) && updated < staleBefore) staleDispatched += 1;
   }
-  return { since, ideasMoved, specsVerified, openDraftPrs, staleDispatched };
+  return { since, ideasMoved, specsVerified, localDraftPrs, targetOpenDrafts, staleDispatched };
 }
