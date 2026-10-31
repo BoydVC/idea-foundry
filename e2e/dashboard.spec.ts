@@ -1,5 +1,17 @@
 import { expect, test } from "@playwright/test";
 
+test("phone width keeps the board on the page", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Idea Foundry" })).toBeVisible();
+  await expect(page.getByTestId("board")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Statechart" })).toBeVisible();
+  await expect(page.getByTestId("invariants")).toContainText("DispatchRequiresGate");
+  await expect(page.getByRole("heading", { name: "Lessons" })).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("add an idea and verify the bottom of its stack", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Idea Foundry" })).toBeVisible();
@@ -29,6 +41,9 @@ test("add an idea and verify the bottom of its stack", async ({ page }) => {
     await page.getByTestId(`dispatch-${id}`).click();
     await page.getByTestId(`ingest-${id}`).click();
     await expect(page.getByTestId(`spec-${id}`)).toContainText("verified");
+    if (index === 1) {
+      await expect(page.getByTestId("banner")).toContainText("report line");
+    }
   }
   await expect(page.getByTestId("detail").locator(".mono").first()).toContainText("i-0006 · verified");
 

@@ -125,6 +125,7 @@ describe("foundry flow", () => {
       false,
     );
     expect(verified.ok).toBe(true);
+    if (verified.ok) expect(verified.warning).toMatch(/report line/);
     expect(store.findSpec(bottom.id)?.state).toBe("verified");
     const repeat = ingest(
       store,
@@ -148,6 +149,63 @@ describe("foundry flow", () => {
     expect(lesson?.count).toBe(2);
     const line = readFileSync(join(store.root, "lessons.jsonl"), "utf8");
     expect(line).toContain("g2:vague-verb");
+  });
+
+  test("ingest asks GitHub whether the pull request is a draft", () => {
+    const store = tempStore();
+    const made = createIdea(store, "weather widget", false);
+    if (!made.ok) throw new Error("create");
+    const id = (made.data as Idea).id;
+    restate(store, id, planner, false);
+    approve(store, id, "Ship the smallest slice", false);
+    const decomposed = decompose(store, id, planner, false);
+    if (!decomposed.ok) throw new Error("decompose");
+    const gated = gate(store, id, false);
+    if (!gated.ok) throw new Error(JSON.stringify(gated));
+    const specs = store.load().specs.filter((spec) => spec.ideaId === id).sort((a, b) => a.index - b.index);
+    const bottom = specs[0];
+    const upper = specs[1];
+    if (!bottom || !upper) throw new Error("missing specs");
+    expect(dispatch(store, bottom.id, false).ok).toBe(true);
+    const pr = "https://github.com/example-org/demo-board/pull/3";
+    const report = (draft: boolean) =>
+      ["---", "verdict: verified", `draft: ${draft}`, `pr: ${pr}`, "---", "", "Synthetic note."].join("\n");
+
+    const closed = ingest(store, bottom.id, report(true), { probe: () => ({ ok: true, draft: false }) }, false);
+    expect(closed.ok).toBe(false);
+    if (!closed.ok) {
+      expect(closed.error).toBe("not_draft");
+      expect(closed.message).toMatch(/GitHub says/);
+    }
+    expect(store.findSpec(bottom.id)?.state).toBe("dispatched");
+
+    const offlineFalse = ingest(
+      store,
+      bottom.id,
+      report(false),
+      { probe: () => ({ ok: false, warning: "GitHub API was unreachable. Using the report line." }) },
+      false,
+    );
+    expect(offlineFalse.ok).toBe(false);
+    if (!offlineFalse.ok) expect(offlineFalse.warning).toMatch(/unreachable/);
+    expect(store.findSpec(bottom.id)?.state).toBe("dispatched");
+
+    const offlineTrue = ingest(
+      store,
+      bottom.id,
+      report(true),
+      { probe: () => ({ ok: false, warning: "GitHub API was unreachable. Using the report line." }) },
+      false,
+    );
+    expect(offlineTrue.ok).toBe(true);
+    if (offlineTrue.ok) expect(offlineTrue.warning).toMatch(/unreachable/);
+    expect(store.findSpec(bottom.id)?.state).toBe("verified");
+
+    expect(dispatch(store, upper.id, false).ok).toBe(true);
+    const apiWins = ingest(store, upper.id, report(false), { probe: () => ({ ok: true, draft: true }) }, false);
+    expect(apiWins.ok).toBe(true);
+    if (apiWins.ok) expect(apiWins.warning).toBeUndefined();
+    expect(store.findSpec(upper.id)?.state).toBe("verified");
   });
 
   test("seed puts five ideas on the board", () => {

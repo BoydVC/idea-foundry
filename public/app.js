@@ -33,13 +33,23 @@ function el(tag, attrs = {}, children = []) {
 }
 
 function showError(result) {
-  if (!result || result.ok !== false) {
+  if (!result) {
     banner.hidden = true;
     banner.textContent = "";
     return;
   }
-  banner.hidden = false;
-  banner.textContent = `${result.message} ${result.next}`;
+  if (result.ok === false) {
+    banner.hidden = false;
+    banner.textContent = `${result.message} ${result.next}`;
+    return;
+  }
+  if (typeof result.warning === "string" && result.warning.length > 0) {
+    banner.hidden = false;
+    banner.textContent = result.warning;
+    return;
+  }
+  banner.hidden = true;
+  banner.textContent = "";
 }
 
 async function api(path, body) {

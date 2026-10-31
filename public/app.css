@@ -181,3 +181,19 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .lessons-wrap ol { margin: 0; padding-left: 18px; }
 
 .lessons-wrap li { margin: 6px 0; }
+
+.hint {
+  color: var(--muted);
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  h1 { font-size: 32px; }
+  .top { align-items: start; gap: 12px; }
+  .add { flex-wrap: wrap; }
+  .board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+}

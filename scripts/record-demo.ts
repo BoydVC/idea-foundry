@@ -54,7 +54,8 @@ try {
     await pause(500);
   }
   await page.getByTestId("detail").locator(".mono").first().getByText("verified").waitFor();
-  await pause(800);
+  await page.getByTestId("banner").scrollIntoViewIfNeeded();
+  await pause(900);
   await page.screenshot({ path: "screenshots/04-verified.png" });
   await page.getByTestId("statechart").scrollIntoViewIfNeeded();
   await pause(1500);

@@ -9,9 +9,10 @@ const result = spawnSync(process.execPath, [join(root, "scripts", "tlc.mjs"), "f
 });
 const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 process.stdout.write(output);
-const failedOnInvariant = (result.status ?? 1) !== 0 && output.includes("VerifiedImpliesDraftPR");
-if (!failedOnInvariant) {
-  process.stderr.write("The mutant was expected to violate VerifiedImpliesDraftPR.\n");
+const failedOnSkip = (result.status ?? 1) !== 0 && output.includes("DispatchRequiresGate is violated");
+const failedOnDraft = output.includes("VerifiedImpliesDraftPR is violated");
+if (!failedOnSkip || failedOnDraft) {
+  process.stderr.write("The mutant was expected to violate DispatchRequiresGate and keep VerifiedImpliesDraftPR.\n");
   process.exit(1);
 }
 process.exit(0);

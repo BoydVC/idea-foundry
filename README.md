@@ -25,7 +25,7 @@ npm run foundry -- ingest s-0001-1 --report report.md --pr https://example.com/d
 
 Every command prints one JSON object. Add `--dry-run` to preview a write. A stale version returns status 409. The `next` field says what to run after an error.
 
-`ingest` accepts only a draft pull request. A report with `draft: false` leaves the spec dispatched.
+`ingest` asks the GitHub API whether the pull request is a draft. When the API answers, that answer wins. When the API is unreachable, or the URL is not a github.com pull request, ingest uses the report line and returns a warning. A report with `draft: false` in that fallback leaves the spec dispatched.
 
 ## Checks
 
@@ -39,4 +39,4 @@ npm run pii
 npm run test:e2e
 ```
 
-`npm run tlc:mutant` passes only when the mutated model violates `VerifiedImpliesDraftPR`.
+`npm run tlc:mutant` passes only when the mutated model violates `DispatchRequiresGate` and still keeps `VerifiedImpliesDraftPR`.

@@ -14,8 +14,12 @@ const codeKeys = new Set(fromCode.map(edgeKey));
 const missing = [...codeKeys].filter((key) => !modelKeys.has(key));
 const extra = [...modelKeys].filter((key) => !codeKeys.has(key));
 const rendered = mermaid(fromModel);
-if (missing.length > 0 || extra.length > 0 || rendered !== chart) {
-  process.stderr.write(`${JSON.stringify({ missing, extra, rendered }, null, 2)}\n`);
+const cfg = readFileSync(join(root, "model", "foundry.cfg"), "utf8");
+const page = readFileSync(join(root, "public", "index.html"), "utf8");
+const invariantNames = ["NoMergeState", "VerifiedImpliesDraftPR", "StackLandsBottomUp", "CASNoLostUpdate", "DispatchRequiresGate"];
+const missingInvariants = invariantNames.filter((name) => !tla.includes(name) || !cfg.includes(`INVARIANT ${name}`) || !page.includes(name));
+if (missing.length > 0 || extra.length > 0 || rendered !== chart || missingInvariants.length > 0) {
+  process.stderr.write(`${JSON.stringify({ missing, extra, missingInvariants, rendered }, null, 2)}\n`);
   process.exit(1);
 }
 process.stdout.write(`statechart edges ${codeKeys.size}\n`);

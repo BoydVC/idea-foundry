@@ -21,6 +21,7 @@ import {
 } from "./domain.js";
 import { checkSpec, passed } from "./gates.js";
 import { buildPacket, parsePacket, parseReport, type ReportDoc } from "./packet.js";
+import { lookupGithubDraft, resolveDraftStatus, type DraftProbe } from "./draft-status.js";
 import { SEED_TITLES, type Planner } from "./planner.js";
 import { Store, type StoreResult } from "./store.js";
 
@@ -28,6 +29,7 @@ export type CommandOk = {
   ok: true;
   dryRun: boolean;
   idempotent?: boolean;
+  warning?: string;
   data: unknown;
 };
 
@@ -37,16 +39,23 @@ export type CommandErr = {
   error: string;
   message: string;
   next: string;
+  warning?: string;
 };
 
 export type CommandResult = CommandOk | CommandErr;
 
-function ok(data: unknown, extra?: { dryRun?: boolean; idempotent?: boolean }): CommandOk {
-  return { ok: true, dryRun: extra?.dryRun ?? false, idempotent: extra?.idempotent, data };
+function ok(data: unknown, extra?: { dryRun?: boolean; idempotent?: boolean; warning?: string }): CommandOk {
+  return {
+    ok: true,
+    dryRun: extra?.dryRun ?? false,
+    idempotent: extra?.idempotent,
+    warning: extra?.warning,
+    data,
+  };
 }
 
-function fail(status: number, error: string, message: string, next: string): CommandErr {
-  return { ok: false, status, error, message, next };
+function fail(status: number, error: string, message: string, next: string, warning?: string): CommandErr {
+  return { ok: false, status, error, message, next, warning };
 }
 
 function fromThrown(error: unknown): CommandErr {
@@ -480,7 +489,7 @@ export function ingest(
   store: Store,
   id: string,
   reportText: string,
-  overrides: { draft?: boolean; pr?: string },
+  overrides: { draft?: boolean; pr?: string; probe?: DraftProbe },
   dryRun: boolean,
 ): CommandResult {
   const spec = store.findSpec(id);
@@ -491,11 +500,8 @@ export function ingest(
   } catch (error) {
     return fromThrown(error);
   }
-  const draft = overrides.draft === false || report.draft === false ? false : overrides.draft === true || report.draft;
+  const reportDraft = overrides.draft === false || report.draft === false ? false : overrides.draft === true || report.draft;
   const prRaw = overrides.pr ?? report.pr;
-  if (!draft) {
-    return fail(422, "not_draft", "Ingest refuses a pull request that is not a draft.", "Open the pull request as a draft, then ingest again.");
-  }
   if (spec.state === "verified") {
     return ok(spec, { idempotent: true, dryRun });
   }
@@ -513,6 +519,10 @@ export function ingest(
     if (!prRaw) {
       return fail(400, "missing_pr", "A verified ingest needs a pull request URL.", "Pass --pr https://example.com/demo/pull/1.");
     }
+  }
+  const decided = resolveDraftStatus(reportDraft, typeof prRaw === "string" ? prRaw : undefined, overrides.probe ?? lookupGithubDraft);
+  if (!decided.draft) {
+    return fail(422, "not_draft", decided.message, decided.next, decided.warning);
   }
   try {
     const pr = typeof prRaw === "string" && prRaw.length > 0 ? prUrl(prRaw) : null;
@@ -536,7 +546,7 @@ export function ingest(
         nextIdea = parseIdea(bump(idea, { state: transition(idea.state, "close"), draft: true }, now));
       }
     }
-    if (dryRun) return ok({ spec: nextSpec, idea: nextIdea }, { dryRun: true });
+    if (dryRun) return ok({ spec: nextSpec, idea: nextIdea }, { dryRun: true, warning: decided.warning });
     const expectIdeas = nextIdea && idea && nextIdea.version !== idea.version ? [{ id: idea.id, version: idea.version }] : [];
     const saved = store.transact({ ideas: expectIdeas, specs: [{ id: spec.id, version: spec.version }] }, (current) => {
       const fresh = current.specs.find((item) => item.id === spec.id);
@@ -556,10 +566,12 @@ export function ingest(
       }
       return { ...current, ideas, specs: current.specs.map((item) => (item.id === written.id ? written : item)) };
     });
-    return fromStore(saved, (value) => ({
+    const savedResult = fromStore(saved, (value) => ({
       spec: value.specs.find((item) => item.id === spec.id),
       idea: value.ideas.find((item) => item.id === spec.ideaId),
     }));
+    if (savedResult.ok && decided.warning) return { ...savedResult, warning: decided.warning };
+    return savedResult;
   } catch (error) {
     return fromThrown(error);
   }
