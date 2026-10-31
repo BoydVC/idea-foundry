@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Idea Foundry</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect fill='%2312100e' width='16' height='16'/%3E%3Cpath fill='%23e2b15a' d='M3 12h10v2H3zM4 3h8l-1 7H5z'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#idea-board">Skip to the idea board</a>
+    <div class="wrap">
+      <header>
+        <p class="mark">Foundry</p>
+        <h1>Idea board</h1>
+        <p class="lede">A raw idea becomes a short stack of specs. Gates run before anything is dispatched. The only pull request this board records is a draft.</p>
+        <p class="meta"><span id="version">version 0</span> <span id="counts"></span></p>
+      </header>
+      <form id="new-idea">
+        <label for="idea-title">New idea</label>
+        <input id="idea-title" name="title" type="text" maxlength="120" required placeholder="habit tracker export" autocomplete="off" />
+        <button type="submit">Add idea</button>
+      </form>
+      <p id="status" role="status"></p>
+      <section aria-labelledby="board-heading">
+        <div class="section-head">
+          <h2 id="board-heading">Ideas</h2>
+          <button type="button" class="quiet" id="show-all">All specs</button>
+        </div>
+        <ul id="idea-board" class="ideas"></ul>
+      </section>
+      <section aria-labelledby="lanes-heading">
+        <h2 id="lanes-heading">Stack lanes</h2>
+        <div id="stack-lanes" class="lanes"></div>
+      </section>
+      <section aria-labelledby="lessons-heading">
+        <h2 id="lessons-heading">Lessons ledger</h2>
+        <ol id="lessons" class="lessons"></ol>
+      </section>
+      <section aria-labelledby="chart-heading">
+        <h2 id="chart-heading">Statechart</h2>
+        <p class="hint">Generated from the model. The picture uses the same edges the checker reads.</p>
+        <ol id="statechart" class="chart" aria-label="Statechart"></ol>
+        <p id="invariants" class="hint"></p>
+        <details>
+          <summary>Mermaid source</summary>
+          <pre id="statechart-source"></pre>
+        </details>
+      </section>
+      <footer>
+        <p>Draft pull requests only. Nothing here merges.</p>
+      </footer>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

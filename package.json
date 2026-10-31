@@ -1,0 +1,30 @@
+{
+  "name": "idea-foundry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Turn a raw idea into a stack of small specs, gate them, and hand a draft to an arena.",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "foundry": "./src/cli.ts"
+  },
+  "scripts": {
+    "foundry": "node src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "tlc": "bash scripts/tlc.sh",
+    "statechart": "node scripts/generate-statechart.ts",
+    "check:chart": "node scripts/check-statechart.ts",
+    "pii": "node scripts/pii-scan.mjs",
+    "test:e2e": "playwright test",
+    "demo": "node scripts/record-demo.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

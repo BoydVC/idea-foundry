@@ -1,0 +1,19 @@
+stateDiagram-v2
+  direction TB
+  [*] --> raw
+  raw --> restated: restate
+  raw --> parked: park
+  restated --> approved: approve
+  restated --> parked: park
+  approved --> specced: decompose
+  approved --> parked: park
+  specced --> gated: gate pass
+  specced --> specced: gate fail
+  specced --> parked: park
+  gated --> specced: gate fail
+  gated --> gated: gate pass
+  gated --> dispatched: dispatch
+  gated --> parked: park
+  dispatched --> verified: verify draft
+  dispatched --> rejected: reject draft
+  dispatched --> parked: park

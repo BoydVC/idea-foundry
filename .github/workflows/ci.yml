@@ -1,0 +1,21 @@
+name: check
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit
+      - run: npm run statechart
+      - run: npm run check:chart
+      - run: npm run tlc
+      - run: node scripts/pii-scan.mjs
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

@@ -1,0 +1,11 @@
+node_modules/
+.tools/
+.tmp/
+data/
+test-results/
+playwright-report/
+blob-report/
+.local/
+screenshots/raw/
+*.webm
+.DS_Store
