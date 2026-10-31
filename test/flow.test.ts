@@ -76,7 +76,9 @@ describe("foundry flow", () => {
     const bottom = specs.find((spec) => spec.index === 1);
     const upper = specs.find((spec) => spec.index === 2);
     if (!bottom || !upper) throw new Error("missing specs");
+    if (bottom.state !== "gated") throw new Error(JSON.stringify({ state: bottom.state, gates: bottom.gates }));
     const sent = dispatch(store, bottom.id, false);
+    if (!sent.ok) throw new Error(JSON.stringify(sent));
     expect(sent.ok).toBe(true);
     const savedBottom = store.findSpec(bottom.id);
     const packetPath = savedBottom && savedBottom.state === "dispatched" ? savedBottom.packetPath : undefined;
