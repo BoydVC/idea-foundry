@@ -32,9 +32,10 @@ export function acceptIntake(intakePath: string): { pickId: string; status: stri
   const data = mkdtempSync(join(tmpdir(), "dd-intake-"));
   try {
     cpSync(intakePath, join(data, "intake.jsonl"));
+    const tsx = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
     const ran = spawnSync(
       process.execPath,
-      ["--experimental-strip-types", "src/cli/dd.ts", "intake", "--from-inbox", "--json", "--data", data],
+      [tsx, join(repo, "src/cli/dd.ts"), "intake", "--from-inbox", "--json", "--data", data],
       { cwd: repo, encoding: "utf8" },
     );
     if (ran.status !== 0) {
