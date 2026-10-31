@@ -309,10 +309,21 @@ export function edgesOfTransition(): Edge[] {
 }
 
 export function pad4(n: number): string {
-  if (!Number.isInteger(n) || n < 1 || n > 9999) {
-    throw new DomainError("bad_counter", `Counter ${n} is outside 1..9999.`, "Start a new data directory.");
+  if (!Number.isInteger(n) || n < 1 || n > Number.MAX_SAFE_INTEGER) {
+    throw new DomainError(
+      "bad_counter",
+      `Counter ${n} is not a positive safe integer.`,
+      "Use a data directory whose next id is a positive integer. Ids look like i-0001 and i-10000.",
+    );
   }
   return String(n).padStart(4, "0");
+}
+
+export function compareRecordIds(a: string, b: string): number {
+  const left = Number(/^[a-z]-(\d+)/.exec(a)?.[1] ?? "0");
+  const right = Number(/^[a-z]-(\d+)/.exec(b)?.[1] ?? "0");
+  if (left !== right) return left - right;
+  return a.localeCompare(b);
 }
 
 export function ideaIdFromCounter(n: number): IdeaId {
@@ -339,28 +350,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function ideaId(raw: string): IdeaId {
-  if (!/^i-\d{4}$/.test(raw)) {
+  if (!/^i-\d{4,}$/.test(raw)) {
     throw new DomainError("bad_idea_id", `Bad idea id ${JSON.stringify(raw)}.`, "Use an id like i-0001.");
   }
   return raw as IdeaId;
 }
 
 export function specId(raw: string): SpecId {
-  if (!/^s-\d{4}-[1-6]$/.test(raw)) {
+  if (!/^s-\d{4,}-[1-6]$/.test(raw)) {
     throw new DomainError("bad_spec_id", `Bad spec id ${JSON.stringify(raw)}.`, "Use an id like s-0001-1.");
   }
   return raw as SpecId;
 }
 
 export function stackId(raw: string): StackId {
-  if (!/^k-\d{4}$/.test(raw)) {
+  if (!/^k-\d{4,}$/.test(raw)) {
     throw new DomainError("bad_stack_id", `Bad stack id ${JSON.stringify(raw)}.`, "Use an id like k-0001.");
   }
   return raw as StackId;
 }
 
 export function lessonId(raw: string): LessonId {
-  if (!/^l-\d{4}$/.test(raw)) {
+  if (!/^l-\d{4,}$/.test(raw)) {
     throw new DomainError("bad_lesson_id", `Bad lesson id ${JSON.stringify(raw)}.`, "Use an id like l-0001.");
   }
   return raw as LessonId;
@@ -388,8 +399,11 @@ export function prUrl(raw: string): PrUrl {
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 
+const TITLE_CONTROLS = /[\u0000-\u001F\u007F\u200B-\u200D\u202A-\u202E\u2066-\u2069\uFEFF]/;
+
 export function normalizeTitle(raw: string): string {
   return raw
+    .normalize("NFC")
     .trim()
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
@@ -398,21 +412,33 @@ export function normalizeTitle(raw: string): string {
 }
 
 export function parseTitle(raw: unknown): string {
-  if (typeof raw !== "string" || raw.trim().length < 2 || raw.length > 200 || /[\r\n]/.test(raw)) {
+  if (typeof raw !== "string") {
+    throw new DomainError("bad_title", "The title must be a string.", "Try `foundry idea \"habit tracker export\"`.");
+  }
+  const normalized = raw.normalize("NFC");
+  if (TITLE_CONTROLS.test(normalized)) {
+    throw new DomainError(
+      "bad_title",
+      "The title contains a control character, a bidi override, or a zero-width character.",
+      "Use a plain product name such as \"habit tracker export\".",
+    );
+  }
+  const title = normalized.trim();
+  if (title.length < 2 || normalized.length > 200) {
     throw new DomainError(
       "bad_title",
       "The title must be one line of 2 to 200 characters.",
       "Try `foundry idea \"habit tracker export\"`.",
     );
   }
-  if (EMAIL.test(raw) || /\d{7,}/.test(raw)) {
+  if (EMAIL.test(title) || /\d{7,}/.test(title)) {
     throw new DomainError(
       "pii_title",
       "The title looks like contact data.",
       "Use a generic product name such as \"weather widget\".",
     );
   }
-  return raw.trim();
+  return title;
 }
 
 export function parsePhase(raw: unknown): Phase {

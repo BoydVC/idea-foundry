@@ -13,6 +13,7 @@ export type PipelineHealth = {
   meanMinutesSpecToVerified: number | null;
   specsVerified: number;
   specsRejected: number;
+  ideasInProgress: number;
   lessonsPromoted: number;
 };
 
@@ -25,8 +26,8 @@ function round1(value: number): number {
 }
 
 export function pipelineHealth(snap: {
-  ideas: readonly { state: Phase; createdAt: string; updatedAt: string }[];
-  specs: readonly { state?: string; createdAt?: string; updatedAt?: string; gates: readonly { gate: GateId; pass: boolean }[] }[];
+  ideas: readonly { id?: string; state: Phase; createdAt: string; updatedAt: string }[];
+  specs: readonly { ideaId?: string; state?: string; createdAt?: string; updatedAt?: string; gates: readonly { gate: GateId; pass: boolean }[] }[];
   lessons: readonly unknown[];
 }): PipelineHealth {
   const ideasByState = Object.fromEntries(PHASES.map((phase) => [phase, 0])) as Record<Phase, number>;
@@ -70,6 +71,16 @@ export function pipelineHealth(snap: {
   const meanMinutesSpecToVerified =
     specMinutes.length === 0 ? null : round1(specMinutes.reduce((sum, value) => sum + value, 0) / specMinutes.length);
 
+  let ideasInProgress = 0;
+  for (const idea of snap.ideas) {
+    if (idea.state !== "gated" || !idea.id) continue;
+    const family = snap.specs.filter((spec) => spec.ideaId === idea.id);
+    if (family.length === 0) continue;
+    const moving = family.some((spec) => spec.state === "verified" || spec.state === "dispatched");
+    const settled = family.every((spec) => spec.state === "verified");
+    if (moving && !settled) ideasInProgress += 1;
+  }
+
   return {
     ideasByState,
     gatePassRates,
@@ -77,6 +88,7 @@ export function pipelineHealth(snap: {
     meanMinutesSpecToVerified,
     specsVerified,
     specsRejected,
+    ideasInProgress,
     lessonsPromoted: snap.lessons.length,
   };
 }

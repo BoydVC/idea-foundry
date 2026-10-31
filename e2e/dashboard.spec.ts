@@ -63,7 +63,8 @@ test("add an idea and verify the bottom of its stack", async ({ page }) => {
     await expect(page.getByTestId(`spec-${id}`)).toContainText("verified");
     if (index === 1) {
       await expect(page.getByTestId("health-spec-results")).toContainText("verified 1");
-      await expect(page.getByTestId("idea-outcome-i-0006")).toContainText("gated");
+      await expect(page.getByTestId("idea-outcome-i-0006")).toContainText("in progress");
+      await expect(page.getByTestId("health-in-progress")).toContainText("in progress 1");
       await expect(page.getByTestId("idea-outcome-i-0006")).toContainText("1 verified");
       await expect(page.getByTestId("banner")).toContainText("report line");
     }

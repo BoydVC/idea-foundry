@@ -145,7 +145,7 @@ export async function startServer(options: { store: Store; port: number; seed?: 
         send(res, 200, createIdea(store, body.title, false, { allowDuplicate: body.allowDuplicate === true }));
         return;
       }
-      const ideaAction = url.pathname.match(/^\/api\/idea\/(i-\d{4})\/(restate|approve|decompose|gate|park)$/);
+      const ideaAction = url.pathname.match(/^\/api\/idea\/(i-\d{4,})\/(restate|approve|decompose|gate|park)$/);
       if (req.method === "POST" && ideaAction) {
         const id = ideaAction[1] ?? "";
         const action = ideaAction[2];
@@ -160,7 +160,7 @@ export async function startServer(options: { store: Store; port: number; seed?: 
         }
         return send(res, 200, park(store, id, false, version));
       }
-      const specAction = url.pathname.match(/^\/api\/spec\/(s-\d{4}-[1-6])\/(dispatch|ingest)$/);
+      const specAction = url.pathname.match(/^\/api\/spec\/(s-\d{4,}-[1-6])\/(dispatch|ingest)$/);
       if (req.method === "POST" && specAction) {
         const id = specAction[1] ?? "";
         const action = specAction[2];

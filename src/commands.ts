@@ -22,7 +22,7 @@ import {
   transition,
   version,
 } from "./domain.js";
-import { backlogDecision, draftBacklogFromEnv, DRAFT_LIMIT, type DraftBacklogProbe } from "./draft-backlog.js";
+import { backlogDecision, draftBacklogFromEnv, DRAFT_LIMIT, WEEKLY_DRAFT_WARNING, type DraftBacklogProbe } from "./draft-backlog.js";
 import { checkSpec, passed } from "./gates.js";
 import { weeklyDigest } from "./health.js";
 import { lessonFindings } from "./lesson-checks.js";
@@ -437,6 +437,10 @@ export function gate(store: Store, id: string, dryRun: boolean, advisory?: Advis
   const blocked = stale(idea.version, expectedVersion);
   if (blocked) return blocked;
   const tlc = checkFoundryModel();
+  if (idea.state === "rejected") {
+    const blockedIdea = ideaFinal(store, idea.id, "gate");
+    if (blockedIdea) return blockedIdea;
+  }
   if (idea.state !== "specced" && idea.state !== "gated") {
     return fail(422, "illegal_transition", `Cannot gate from ${idea.state}.`, "Run `foundry decompose <id>` first.");
   }
@@ -517,6 +521,8 @@ export function dispatch(
 ): CommandResult {
   const spec = store.findSpec(id);
   if (!spec) return missingSpec(id);
+  const finalIdea = ideaFinal(store, spec.ideaId, "dispatch");
+  if (finalIdea) return finalIdea;
   const blocked = stale(spec.version, expectedVersion);
   if (blocked) return blocked;
   if (spec.state === "dispatched" || spec.state === "verified") {
@@ -568,6 +574,23 @@ export function dispatch(
   } catch (error) {
     return fromThrown(error);
   }
+}
+
+function ideaFinal(store: Store, id: string, action: "dispatch" | "ingest" | "gate"): CommandErr | null {
+  const idea = store.findIdea(id);
+  if (idea?.state !== "rejected") return null;
+  return fail(
+    409,
+    "idea_final",
+    `Idea ${idea.id} is rejected, so its specs cannot ${action}.`,
+    "This idea is final. Start a new idea instead of moving its remaining specs.",
+  );
+}
+
+function unconfirmedResult(spec: { id: string; state: string }, decided: { warning?: string; message: string; next: string; code?: string; httpStatus?: number }): CommandErr {
+  const result = withheldResult(decided);
+  if (result.error !== "github_unconfirmed") return result;
+  return { ...result, message: `GitHub could not confirm the pull request. The spec stays ${spec.state}.` };
 }
 
 function unverify(
@@ -722,6 +745,8 @@ export function ingest(
 ): CommandResult {
   const spec = store.findSpec(id);
   if (!spec) return missingSpec(id);
+  const finalIdea = ideaFinal(store, spec.ideaId, "ingest");
+  if (finalIdea) return finalIdea;
   const blocked = stale(spec.version, overrides.expectedVersion);
   if (blocked) return blocked;
   let report: ReportDoc;
@@ -760,7 +785,7 @@ export function ingest(
       );
     }
     const decided = resolveDraftStatus(reportDraft, spec.prUrl, overrides.probe ?? lookupGithubDraft);
-    if (decided.withheld) return withheldResult(decided);
+    if (decided.withheld) return unconfirmedResult(spec, decided);
     if (decided.draft) return ok(spec, { idempotent: true, dryRun, warning: decided.warning });
     if (decided.warning) return fail(422, "not_draft", decided.message, decided.next, decided.warning);
     return unverify(store, spec, decided, dryRun);
@@ -778,7 +803,13 @@ export function ingest(
     }
   }
   const decided = resolveDraftStatus(reportDraft, typeof prRaw === "string" ? prRaw : undefined, overrides.probe ?? lookupGithubDraft);
-  if (decided.withheld) return withheldResult(decided);
+  if (decided.withheld) {
+    if (decided.code === "offline" || decided.code === "api_failure") {
+      const pr = typeof prRaw === "string" ? prRaw : undefined;
+      store.writeAttempt(spec.id, reportText, pr);
+    }
+    return unconfirmedResult(spec, decided);
+  }
   if (!decided.draft) {
     return fail(422, "not_draft", decided.message, decided.next, decided.warning);
   }
@@ -845,6 +876,19 @@ export function ingest(
   } catch (error) {
     return fromThrown(error);
   }
+}
+
+export function recheck(
+  store: Store,
+  id: string,
+  overrides: { pr?: string; probe?: DraftProbe; expectedVersion?: number; unverify?: boolean },
+  dryRun: boolean,
+): CommandResult {
+  const attempt = store.readAttempt(id);
+  if (!attempt) {
+    return fail(400, "missing_report", "There is no stored report to recheck.", "Pass --report the first time you ingest this spec.");
+  }
+  return ingest(store, id, attempt.report, { ...overrides, pr: overrides.pr ?? attempt.pr }, dryRun);
 }
 
 export function park(store: Store, id: string, dryRun: boolean, expectedVersion?: number): CommandResult {
@@ -1062,7 +1106,7 @@ export function weekly(store: Store, since: string): CommandResult {
     const backlog = draftBacklogFromEnv()(target);
     const targetOpenDrafts = backlog.ok ? backlog.drafts : null;
     const result = ok(weeklyDigest(store.load(), since, targetOpenDrafts));
-    if (!backlog.ok) return { ...result, warning: backlog.warning };
+    if (!backlog.ok) return { ...result, warning: WEEKLY_DRAFT_WARNING };
     return result;
   } catch (error) {
     return fromThrown(error);

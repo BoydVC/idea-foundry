@@ -4,6 +4,8 @@ export const DRAFT_LIMIT = 10;
 
 export const OFFLINE_DRAFT_WARNING = "GitHub API was unreachable. Dispatch is continuing without a draft count.";
 
+export const WEEKLY_DRAFT_WARNING = "GitHub did not return an open-draft count for the target repo. targetOpenDrafts is null.";
+
 export type DraftBacklog = { ok: true; drafts: number } | { ok: false; warning: string };
 
 export type DraftBacklogProbe = (target: string) => DraftBacklog;

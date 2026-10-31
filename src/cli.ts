@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
-import { createIdea, approve, correct, decompose, dispatch, gate, importBookmarks, importNotes, ingest, park, probePeerReview, restate, seedDemo, weekly } from "./commands.js";
+import { createIdea, approve, correct, decompose, dispatch, gate, importBookmarks, importNotes, ingest, park, probePeerReview, recheck, restate, seedDemo, weekly } from "./commands.js";
+import { DomainError } from "./domain.js";
 import { foundryPort } from "./port.js";
 import { selectPlanner } from "./planners/llm.js";
 import { SEED_TITLES } from "./planner.js";
@@ -147,8 +148,12 @@ export async function main(argv: string[]): Promise<number> {
         result = dispatch(store, pos[0] ?? "", flags.dryRun, flags.version);
         break;
       case "ingest": {
+        if (!flags.report && flags.recheck) {
+          result = recheck(store, pos[0] ?? "", { pr: flags.pr, expectedVersion: flags.version, unverify: flags.unverify }, flags.dryRun);
+          break;
+        }
         if (!flags.report) {
-          result = { ok: false, status: 400, error: "missing_report", message: "Ingest needs a report file.", next: "Pass --report final.md." };
+          result = { ok: false, status: 400, error: "missing_report", message: "Ingest needs a report file.", next: "Pass --report final.md, or retry with --recheck after a stored attempt." };
           break;
         }
         const text = store.readText(flags.report);
@@ -167,7 +172,7 @@ export async function main(argv: string[]): Promise<number> {
       case "import": {
         const file = flags.from ?? pos[0];
         if (flags.from) {
-          result = importBookmarks(store, store.readText(flags.from), planner, flags.dryRun);
+          result = importBookmarks(store, store.readImport(flags.from), planner, flags.dryRun);
           break;
         }
         if (!file) {
@@ -180,7 +185,7 @@ export async function main(argv: string[]): Promise<number> {
           };
           break;
         }
-        result = importNotes(store, store.readText(file), planner, flags.dryRun);
+        result = importNotes(store, store.readImport(file), planner, flags.dryRun);
         break;
       }
       case "correct":
@@ -210,8 +215,12 @@ export async function main(argv: string[]): Promise<number> {
         result = { ok: false, status: 400, error: "unknown_command", message: `Unknown command ${command}.`, next: "Run `foundry --help`." };
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Command failed.";
-    result = { ok: false, status: 500, error: "internal", message, next: "Retry the command." };
+    if (error instanceof DomainError) {
+      result = { ok: false, status: 400, error: error.code, message: error.message, next: error.next };
+    } else {
+      const message = error instanceof Error ? error.message : "Command failed.";
+      result = { ok: false, status: 500, error: "internal", message, next: "Retry the command." };
+    }
   }
   process.stdout.write(`${JSON.stringify(result)}\n`);
   return result.ok ? 0 : 1;
