@@ -39,6 +39,7 @@ export type Expectation = {
 };
 
 export type IntakeLine = {
+  ts: string;
   idea: string;
   source: "foundry";
   target: string;

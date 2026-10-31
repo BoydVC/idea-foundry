@@ -12,6 +12,7 @@
   },
   "scripts": {
     "foundry": "tsx src/cli.ts",
+    "pipeline": "tsx scripts/pipeline.ts",
     "dashboard": "tsx src/server.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

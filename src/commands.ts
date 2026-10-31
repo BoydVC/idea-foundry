@@ -22,6 +22,7 @@ import {
 } from "./domain.js";
 import { checkSpec, passed } from "./gates.js";
 import { DEFAULT_TARGET, buildPacket, parsePacket, parseReport, parseTarget, type ReportDoc } from "./packet.js";
+import { type Advisory } from "./review.js";
 import { checkFoundryModel } from "./tlc.js";
 import { join } from "node:path";
 import { lookupGithubDraft, resolveDraftStatus, type DraftProbe } from "./draft-status.js";
@@ -360,23 +361,7 @@ function desiredIdeaState(specs: Spec[]): "gated" | "specced" {
   return ready ? "gated" : "specced";
 }
 
-export type Advisory = { status: "skipped"; reason: string } | { status: "note"; text: string };
-
-export async function probePeerReview(url: string, timeoutMs: number): Promise<Advisory> {
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source: "idea-foundry" }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) return { status: "skipped", reason: `peer review arena returned ${response.status}` };
-    const text = await response.text();
-    return { status: "note", text: text.slice(0, 500) };
-  } catch {
-    return { status: "skipped", reason: "peer review arena is not reachable" };
-  }
-}
+export { probePeerReview, startReviewStub, type Advisory } from "./review.js";
 
 export function gate(store: Store, id: string, dryRun: boolean, advisory?: Advisory, expectedVersion?: number): CommandResult {
   const idea = store.findIdea(id);
@@ -479,7 +464,7 @@ export function dispatch(store: Store, id: string, dryRun: boolean, expectedVers
     }
   }
   const target = parseTarget(process.env.FOUNDRY_TARGET ?? DEFAULT_TARGET);
-  const packet = buildPacket(spec, target);
+  const packet = buildPacket(spec, target, store.now());
   const body = `${JSON.stringify(packet, null, 2)}\n`;
   const packetPath = join(store.root, "packets", `${spec.id}.json`);
   if (dryRun) {

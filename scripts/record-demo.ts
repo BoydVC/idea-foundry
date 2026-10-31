@@ -1,7 +1,11 @@
 import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { chromium } from "@playwright/test";
 import { startServer } from "../src/server.js";
 import { Store } from "../src/store.js";
+import { acceptIntake, ensureDraftDay } from "./accept-draft-day.js";
+
+ensureDraftDay();
 
 const store = new Store("data/demo");
 store.reset();
@@ -49,6 +53,18 @@ try {
     const id = `s-0006-${index}`;
     await page.getByTestId(`dispatch-${id}`).click();
     await pause(400);
+    if (index === 1) {
+      const accepted = acceptIntake(join("data/demo", "intake.jsonl"));
+      await page.evaluate((text) => {
+        const banner = document.querySelector("#banner");
+        if (!(banner instanceof HTMLElement)) return;
+        banner.hidden = false;
+        banner.textContent = text;
+      }, `Draft Day accepted ${accepted.pickId} as intake.`);
+      await page.getByTestId("banner").scrollIntoViewIfNeeded();
+      await pause(1600);
+      await page.screenshot({ path: "screenshots/04-packet.png" });
+    }
     await page.getByTestId(`ingest-${id}`).click();
     await page.getByTestId(`spec-${id}`).getByText("verified").waitFor();
     await pause(500);

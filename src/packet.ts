@@ -1,10 +1,11 @@
 import { DomainError, type IdeaId, type PrUrl, type Spec, type SpecId, prUrl, specId, ideaId } from "./domain.js";
 
 export const FORBID = ["merge", "deploy", "send"] as const;
-export const DEFAULT_TARGET = "example-org/demo-board";
-const TARGET = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+export const DEFAULT_TARGET = "BoydVC/draft-day";
+const TARGET = /^BoydVC\/[A-Za-z0-9._-]+$/;
 
 export type IntakeLine = {
+  ts: string;
   idea: string;
   source: "foundry";
   target: string;
@@ -16,8 +17,8 @@ export function parseTarget(value: string): string {
   if (!TARGET.test(target)) {
     throw new DomainError(
       "bad_target",
-      "The intake target must look like owner/repo.",
-      "Pass a target such as example-org/demo-board.",
+      "Draft Day accepts a target of BoydVC/<repo> that is listed in its targets.json.",
+      "Use BoydVC/draft-day, which the stock Draft Day allowlist already contains.",
     );
   }
   return target;
@@ -51,7 +52,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function buildPacket(spec: Spec, target = DEFAULT_TARGET): ArenaPacket {
+export function buildPacket(spec: Spec, target = DEFAULT_TARGET, ts = new Date().toISOString()): ArenaPacket {
   return {
     protocol: "dd-intake/v1",
     command: "intake",
@@ -67,6 +68,7 @@ export function buildPacket(spec: Spec, target = DEFAULT_TARGET): ArenaPacket {
     requiresDraftPr: true,
     forbid: FORBID,
     intake: {
+      ts,
       idea: spec.title,
       source: "foundry",
       target: parseTarget(target),
@@ -91,11 +93,17 @@ export function parsePacket(input: unknown): ArenaPacket {
   }
   const landsRaw = input.landsAfter;
   const intake = input.intake;
-  if (!isRecord(intake) || intake.source !== "foundry" || intake.n !== 3 || typeof intake.idea !== "string") {
+  if (
+    !isRecord(intake) ||
+    intake.source !== "foundry" ||
+    intake.n !== 3 ||
+    typeof intake.idea !== "string" ||
+    typeof intake.ts !== "string"
+  ) {
     throw new DomainError(
       "bad_packet",
-      "The packet needs an intake line with idea, source, target, and n.",
-      "Dispatch the spec again so intake.jsonl is written with the packet.",
+      "The packet needs an intake line with ts, idea, source, target, and n.",
+      "Dispatch the spec again so intake.jsonl matches Draft Day's inbox.",
     );
   }
   const target = parseTarget(String(intake.target));
@@ -113,7 +121,7 @@ export function parsePacket(input: unknown): ArenaPacket {
     landsAfter: landsRaw === null ? null : specId(String(landsRaw)),
     requiresDraftPr: true,
     forbid: FORBID,
-    intake: { idea: String(intake.idea), source: "foundry", target, n: 3 },
+    intake: { ts: String(intake.ts), idea: String(intake.idea), source: "foundry", target, n: 3 },
   };
 }
 

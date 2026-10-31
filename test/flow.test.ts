@@ -82,7 +82,7 @@ describe("foundry flow", () => {
     const packetPath = savedBottom && savedBottom.state === "dispatched" ? savedBottom.packetPath : undefined;
     if (!packetPath) throw new Error("packet path");
     const packet = parsePacket(JSON.parse(readFileSync(packetPath, "utf8")) as unknown);
-    expect(packet).toEqual(buildPacket(store.findSpec(bottom.id) as Spec));
+    expect(packet).toEqual(buildPacket(store.findSpec(bottom.id) as Spec, "BoydVC/draft-day", "2026-01-01T00:00:00.000Z"));
     expect(packet.protocol).toBe("dd-intake/v1");
     expect(packet.requiresDraftPr).toBe(true);
     const early = ingest(
@@ -239,7 +239,13 @@ describe("foundry flow", () => {
     const sent = dispatch(store, bottom.id, false, bottom.version);
     expect(sent.ok).toBe(true);
     expect(store.readIntake()).toEqual([
-      { idea: bottom.title, source: "foundry", target: "example-org/demo-board", n: 3 },
+      {
+        ts: "2026-01-01T00:00:00.000Z",
+        idea: bottom.title,
+        source: "foundry",
+        target: "BoydVC/draft-day",
+        n: 3,
+      },
     ]);
   });
 

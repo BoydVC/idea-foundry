@@ -2,6 +2,19 @@
 
 Idea Foundry turns one raw idea into an ordered stack of small specs, runs the static gates, and writes a draft arena packet. It does not merge, deploy, or send anything.
 
+## Run the pipeline
+
+About two minutes from a raw idea to a Draft Day pick. This does not merge anything.
+
+```bash
+npm ci
+npm run pipeline
+```
+
+The script restates, approves, decomposes, and gates `habit tracker export`, dispatches the bottom spec, and runs Draft Day's `dd intake --from-inbox` on that inbox line. Draft Day is cloned read-only at `fa266c249405c25db0b900ce0cc5d3a0fd744ce7`. The printed JSON includes the pick id and `status: intake`.
+
+Peer review is optional. `foundry gate` asks `http://127.0.0.1:4333/review` and continues when that port is closed. Set `FOUNDRY_REVIEW_URL` to point the adapter somewhere else.
+
 ## Run the board
 
 ```bash

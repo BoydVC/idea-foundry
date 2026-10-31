@@ -6,7 +6,7 @@ import { builtinTerms, scanText } from "../src/pii.js";
 
 const root = process.cwd();
 const allow = new Set([".ts", ".js", ".mjs", ".css", ".html", ".md", ".json", ".yml", ".yaml", ".mmd", ".tla", ".cfg"]);
-const skip = new Set(["node_modules", "dist", "data", "tools", ".git", "test-results", "playwright-report", ".local"]);
+const skip = new Set(["node_modules", "dist", "data", "tools", ".git", "test-results", "playwright-report", ".local", "vendor"]);
 const denylistPath = process.env.FOUNDRY_DENYLIST ?? join(root, ".local", "pii-denylist.txt");
 const gifPath = join(root, "screenshots", "demo.gif");
 
