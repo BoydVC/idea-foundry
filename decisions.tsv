@@ -1,0 +1,6 @@
+ts	phase	decision	why	evidence	result
+2026-10-31T13:47:00Z	model	Put the legal steps in model/foundry.tla and made transition() follow that table	The check has to fail when a spec skips the gate, so the model is the source and the code is compared to it	model/foundry.tla	TLC 287 states, no error
+2026-10-31T13:48:00Z	model	Kept one module and flipped SkipGate in a second config	A copied module would drift. The mutation is the same Next with one extra dispatch	model/foundry_skip_gate.cfg	DispatchRequiresGate violated
+2026-10-31T13:55:00Z	store	One snapshot file, lock, re-read, then rename	Two writers share one board. The version check is the invariant, the lock stops a lost update between the check and the rename	src/store.ts	stale write throws 409
+2026-10-31T14:01:00Z	dashboard	Plain HTML on port 4440, merge returns 403	The spec forbids a merge path. The button exists so the refusal is visible	public/index.html	Playwright 403
+2026-10-31T14:04:00Z	proof	Recorded the board walk as screenshots/demo.gif	The verifier needs the running UI, not a description of it	screenshots/demo.gif	9.0s, 2.4MB, synthetic titles only

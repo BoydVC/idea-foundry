@@ -1,0 +1,29 @@
+{
+  "name": "idea-foundry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "foundry": "./bin/foundry.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "tlc": "node --experimental-strip-types scripts/tlc.ts",
+    "gen:statechart": "node --experimental-strip-types scripts/gen-statechart.ts",
+    "dashboard": "node --experimental-strip-types src/server.ts",
+    "foundry": "node --experimental-strip-types src/cli.ts",
+    "pii": "node --experimental-strip-types scripts/pii-scan.ts",
+    "g0": "node --experimental-strip-types scripts/check-g0.ts",
+    "e2e": "playwright test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
