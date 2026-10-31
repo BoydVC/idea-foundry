@@ -339,22 +339,14 @@ export function version(raw: number): Version {
   return raw as Version;
 }
 
+const GITHUB_PULL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+$/;
+
 export function prUrl(raw: string): PrUrl {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
+  if (!GITHUB_PULL.test(raw)) {
     throw new DomainError(
       "bad_pr",
-      "The pull request must be an https URL.",
-      "Pass --pr https://example.com/demo/pull/1.",
-    );
-  }
-  if (parsed.protocol !== "https:") {
-    throw new DomainError(
-      "bad_pr",
-      "The pull request must be an https URL.",
-      "Pass --pr https://example.com/demo/pull/1.",
+      "The pull request must be an https://github.com/<owner>/<repo>/pull/<number> URL.",
+      "Pass --pr https://github.com/example-org/demo-board/pull/1.",
     );
   }
   return raw as PrUrl;

@@ -10,6 +10,7 @@ type Flags = {
   report?: string;
   pr?: string;
   draft?: boolean;
+  version?: number;
   help: boolean;
 };
 
@@ -22,7 +23,12 @@ function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
     else if (arg === "--help" || arg === "-h") flags.help = true;
     else if (arg === "--draft") flags.draft = true;
     else if (arg === "--no-draft") flags.draft = false;
-    else if (arg === "--data" || arg === "--note" || arg === "--report" || arg === "--pr") {
+    else if (arg === "--version" || arg === "--record-version") {
+      const value = argv[i + 1];
+      if (!value || !/^\d+$/.test(value)) throw new Error(`${arg} needs a non-negative integer.`);
+      i += 1;
+      flags.version = Number(value);
+    } else if (arg === "--data" || arg === "--note" || arg === "--report" || arg === "--pr") {
       const value = argv[i + 1];
       if (!value) throw new Error(`Missing value for ${arg}.`);
       i += 1;
@@ -46,7 +52,7 @@ const HELP = {
       "foundry decompose i-0001",
       "foundry gate i-0001",
       "foundry dispatch s-0001-1",
-      "foundry ingest s-0001-1 --report report.md --pr https://example.com/demo/pull/1",
+      "foundry ingest s-0001-1 --report report.md --pr https://github.com/example-org/demo-board/pull/1",
       "foundry park i-0001",
       "foundry seed",
       "foundry dashboard",
@@ -89,21 +95,21 @@ export async function main(argv: string[]): Promise<number> {
         result = createIdea(store, pos.join(" "), flags.dryRun);
         break;
       case "restate":
-        result = restate(store, pos[0] ?? "", planner, flags.dryRun);
+        result = restate(store, pos[0] ?? "", planner, flags.dryRun, flags.version);
         break;
       case "approve":
-        result = approve(store, pos[0] ?? "", flags.note, flags.dryRun);
+        result = approve(store, pos[0] ?? "", flags.note, flags.dryRun, flags.version);
         break;
       case "decompose":
-        result = decompose(store, pos[0] ?? "", planner, flags.dryRun);
+        result = decompose(store, pos[0] ?? "", planner, flags.dryRun, flags.version);
         break;
       case "gate": {
         const advisory = await probePeerReview(process.env.FOUNDRY_REVIEW_URL ?? "http://127.0.0.1:4333/review", 150);
-        result = gate(store, pos[0] ?? "", flags.dryRun, advisory);
+        result = gate(store, pos[0] ?? "", flags.dryRun, advisory, flags.version);
         break;
       }
       case "dispatch":
-        result = dispatch(store, pos[0] ?? "", flags.dryRun);
+        result = dispatch(store, pos[0] ?? "", flags.dryRun, flags.version);
         break;
       case "ingest": {
         if (!flags.report) {
@@ -111,11 +117,11 @@ export async function main(argv: string[]): Promise<number> {
           break;
         }
         const text = store.readText(flags.report);
-        result = ingest(store, pos[0] ?? "", text, { draft: flags.draft, pr: flags.pr }, flags.dryRun);
+        result = ingest(store, pos[0] ?? "", text, { draft: flags.draft, pr: flags.pr, expectedVersion: flags.version }, flags.dryRun);
         break;
       }
       case "park":
-        result = park(store, pos[0] ?? "", flags.dryRun);
+        result = park(store, pos[0] ?? "", flags.dryRun, flags.version);
         break;
       case "seed":
         if (flags.dryRun) {

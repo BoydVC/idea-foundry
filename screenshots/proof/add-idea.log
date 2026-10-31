@@ -1,4 +1,10 @@
 doctor 200 {"ok":true,"service":"idea-foundry","port":4460,"ideas":5}
-state {"id":"i-0006","version":1,"title":"unit converter card","labels":[],"createdAt":"2026-10-31T14:26:44.993Z","updatedAt":"2026-10-31T14:26:44.993Z","state":"raw"}
+state {"id":"i-0006","version":1,"title":"unit converter card","labels":[],"createdAt":"2026-10-31T14:43:50.118Z","updatedAt":"2026-10-31T14:43:50.118Z","state":"raw"}
 merge 403
+{
+  "ok": true,
+  "files": 62,
+  "denylist": true,
+  "frames": 114
+}
 ok

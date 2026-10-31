@@ -1,4 +1,5 @@
 const PHASES = ["raw", "restated", "approved", "specced", "gated", "dispatched", "verified", "rejected", "parked"];
+const DEMO_PR = "https://github.com/example-org/demo-board/pull/1";
 
 const POS = {
   raw: [70, 48],
@@ -112,21 +113,21 @@ function renderDetail(state) {
   if (idea.restatement) detail.append(el("p", { text: idea.restatement }));
   const actions = el("div", { class: "actions" });
   if (idea.state === "raw") {
-    actions.append(actionButton("Restate", "action-restate", () => post(`/api/idea/${idea.id}/restate`, {})));
+    actions.append(actionButton("Restate", "action-restate", () => post(`/api/idea/${idea.id}/restate`, { version: idea.version })));
   }
   if (idea.state === "restated") {
     const note = el("input", { class: "note", id: "approve-note", "data-testid": "approve-note", value: "Ship the smallest slice" });
     actions.append(note);
-    actions.append(actionButton("Approve", "action-approve", () => post(`/api/idea/${idea.id}/approve`, { note: note.value })));
+    actions.append(actionButton("Approve", "action-approve", () => post(`/api/idea/${idea.id}/approve`, { note: note.value, version: idea.version })));
   }
   if (idea.state === "approved") {
-    actions.append(actionButton("Decompose", "action-decompose", () => post(`/api/idea/${idea.id}/decompose`, {})));
+    actions.append(actionButton("Decompose", "action-decompose", () => post(`/api/idea/${idea.id}/decompose`, { version: idea.version })));
   }
   if (idea.state === "specced" || idea.state === "gated") {
-    actions.append(actionButton("Run gates", "action-gate", () => post(`/api/idea/${idea.id}/gate`, {})));
+    actions.append(actionButton("Run gates", "action-gate", () => post(`/api/idea/${idea.id}/gate`, { version: idea.version })));
   }
   if (idea.state !== "parked" && idea.state !== "verified" && idea.state !== "rejected") {
-    actions.append(actionButton("Park", "action-park", () => post(`/api/idea/${idea.id}/park`, {})));
+    actions.append(actionButton("Park", "action-park", () => post(`/api/idea/${idea.id}/park`, { version: idea.version })));
   }
   detail.append(actions);
 
@@ -147,10 +148,10 @@ function renderDetail(state) {
       lane.append(row);
     }
     if (spec.state === "gated") {
-      lane.append(actionButton("Dispatch", `dispatch-${spec.id}`, () => post(`/api/spec/${spec.id}/dispatch`, {})));
+      lane.append(actionButton("Dispatch", `dispatch-${spec.id}`, () => post(`/api/spec/${spec.id}/dispatch`, { version: spec.version })));
     }
     if (spec.state === "dispatched") {
-      const pr = el("input", { class: "pr", "data-testid": `ingest-pr-${spec.id}`, value: "https://example.com/demo/pull/1" });
+      const pr = el("input", { class: "pr", "data-testid": `ingest-pr-${spec.id}`, value: DEMO_PR });
       const draft = el("input", { type: "checkbox", "data-testid": `ingest-draft-${spec.id}` });
       draft.checked = true;
       const draftLabel = el("label", { text: " Draft pull request" });
@@ -158,7 +159,7 @@ function renderDetail(state) {
       lane.append(pr, draftLabel);
       lane.append(
         actionButton("Ingest", `ingest-${spec.id}`, () =>
-          post(`/api/spec/${spec.id}/ingest`, { pr: pr.value, draft: draft.checked, verdict: "verified" }),
+          post(`/api/spec/${spec.id}/ingest`, { pr: pr.value, draft: draft.checked, verdict: "verified", version: spec.version }),
         ),
       );
     }

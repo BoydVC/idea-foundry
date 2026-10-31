@@ -20,12 +20,12 @@ npm run foundry -- approve i-0001 --note "Ship the smallest slice"
 npm run foundry -- decompose i-0001
 npm run foundry -- gate i-0001
 npm run foundry -- dispatch s-0001-1
-npm run foundry -- ingest s-0001-1 --report report.md --pr https://example.com/demo/pull/1
+npm run foundry -- ingest s-0001-1 --report report.md --pr https://github.com/example-org/demo-board/pull/1
 ```
 
 Every command prints one JSON object. Add `--dry-run` to preview a write. A stale version returns status 409. The `next` field says what to run after an error.
 
-`ingest` asks the GitHub API whether the pull request is a draft. When the API answers, that answer wins. When the API is unreachable, or the URL is not a github.com pull request, ingest uses the report line and returns a warning. A report with `draft: false` in that fallback leaves the spec dispatched.
+`ingest` accepts only `https://github.com/<owner>/<repo>/pull/<number>`. It asks the GitHub API whether that pull request is a draft, including when the spec is already verified. When the API answers, that answer wins. When the API is unreachable, ingest uses the report line and returns a warning. Pass `--version` or `--record-version` to send the record version you read. A mismatch returns 409. `foundry gate` runs TLC on `model/foundry.tla` and fails the gate when TLC fails. `foundry dispatch` appends `{idea, source, target, n}` to `intake.jsonl` only after the compare-and-swap succeeds.
 
 ## Checks
 
@@ -39,4 +39,4 @@ npm run pii
 npm run test:e2e
 ```
 
-`npm run tlc:mutant` passes only when the mutated model violates `DispatchRequiresGate` and still keeps `VerifiedImpliesDraftPR`.
+`npm run tlc:mutant` passes only when `foundry_skip_gate.cfg` violates `DispatchRequiresGate`, `foundry_merge.cfg` violates `NoMergeState`, and `foundry_lost.cfg` violates `CASNoLostUpdate`. All three configs use `model/foundry.tla`.

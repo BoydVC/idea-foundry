@@ -19,12 +19,12 @@ Dispatch writes an intake packet. Ingest records a draft pull request and walks 
 Preconditions: `s-0006-1` shows G1, G2, and G3 pass.
 
 - Click `dispatch-s-0006-1`. Result: `ingest-s-0006-1` is visible.
-- Click `ingest-s-0006-1` with `ingest-draft-s-0006-1` checked and the pr field `https://example.com/demo/pull/1`. Result: the lane text contains `verified`.
+- Click `ingest-s-0006-1` with `ingest-draft-s-0006-1` checked and the pr field `https://github.com/example-org/demo-board/pull/1`. Result: the lane text contains `verified`.
 - Repeat dispatch and ingest for `s-0006-2` and later slices in order. Result: after the last slice, the detail line contains `i-0006 · verified`.
 - Uncheck the draft box on a dispatched spec and ingest. Result: the banner says the pull request is not a draft and the lane stays `dispatched`.
 
 ## Gotchas
 
 - Ingest of slice 2 before slice 1 is verified returns `stack_order`. Verify the bottom slice first.
-- The pr field must be https. `example.com` is the fixture host.
+- The pr field must be `https://github.com/<owner>/<repo>/pull/<number>`. `example-org/demo-board` is the fixture target.
 - `POST /api/merge` is 403. Do not look for a merge button.

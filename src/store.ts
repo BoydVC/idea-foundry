@@ -38,6 +38,18 @@ export type Expectation = {
   specs: { id: SpecId; version: Version }[];
 };
 
+export type IntakeLine = {
+  idea: string;
+  source: "foundry";
+  target: string;
+  n: 3;
+};
+
+export type CommitSide = {
+  packet?: { id: SpecId; body: string };
+  intake?: IntakeLine;
+};
+
 export type StoreFailure = {
   ok: false;
   status: number;
@@ -103,7 +115,7 @@ export class Store {
     return parseSnapshot(JSON.parse(readFileSync(path, "utf8")) as unknown);
   }
 
-  transact(expect: Expectation, mutate: (snap: Snapshot) => Snapshot): StoreResult<Snapshot> {
+  transact(expect: Expectation, mutate: (snap: Snapshot) => Snapshot, side?: CommitSide): StoreResult<Snapshot> {
     return this.withLock(() => {
       const current = this.load();
       for (const item of expect.ideas) {
@@ -137,6 +149,13 @@ export class Store {
       const next = parseSnapshot({ ...produced, version: version(current.version + 1) });
       this.writeSnapshot(next);
       this.appendLog(current, next);
+      if (side?.packet) {
+        const written = next.specs.find((spec) => spec.id === side.packet?.id);
+        if (written?.state === "dispatched") {
+          this.writePacket(side.packet.id, side.packet.body);
+          if (side.intake) this.appendIntake(side.intake);
+        }
+      }
       return { ok: true, value: next };
     });
   }
@@ -177,6 +196,19 @@ export class Store {
       throw new DomainError("bad_model", "Model name rejected.", "Ask for a file in model/.");
     }
     return readFileSync(join(this.modelDir(), name), "utf8");
+  }
+
+  readIntake(): IntakeLine[] {
+    const path = join(this.root, "intake.jsonl");
+    if (!existsSync(path)) return [];
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as IntakeLine);
+  }
+
+  private appendIntake(line: IntakeLine): void {
+    appendFileSync(join(this.root, "intake.jsonl"), `${JSON.stringify(line)}\n`);
   }
 
   writePacket(id: SpecId, body: string): string {

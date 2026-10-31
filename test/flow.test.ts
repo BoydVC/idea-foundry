@@ -88,7 +88,7 @@ describe("foundry flow", () => {
     const early = ingest(
       store,
       upper.id,
-      ["---", "verdict: verified", "draft: true", "pr: https://example.com/demo/pull/2", "---", "", "note"].join("\n"),
+      ["---", "verdict: verified", "draft: true", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "note"].join("\n"),
       {},
       false,
     );
@@ -99,7 +99,7 @@ describe("foundry flow", () => {
     const blocked = ingest(
       store,
       upper.id,
-      ["---", "verdict: verified", "draft: true", "pr: https://example.com/demo/pull/2", "---", "", "note"].join("\n"),
+      ["---", "verdict: verified", "draft: true", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "note"].join("\n"),
       {},
       false,
     );
@@ -109,7 +109,7 @@ describe("foundry flow", () => {
     const published = ingest(
       store,
       bottom.id,
-      ["---", "verdict: verified", "draft: false", "pr: https://example.com/demo/pull/2", "---", "", "note"].join("\n"),
+      ["---", "verdict: verified", "draft: false", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "note"].join("\n"),
       {},
       false,
     );
@@ -120,7 +120,7 @@ describe("foundry flow", () => {
     const verified = ingest(
       store,
       bottom.id,
-      ["---", "verdict: verified", "draft: true", "pr: https://example.com/demo/pull/2", "---", "", "Synthetic note."].join("\n"),
+      ["---", "verdict: verified", "draft: true", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "Synthetic note."].join("\n"),
       {},
       false,
     );
@@ -130,7 +130,7 @@ describe("foundry flow", () => {
     const repeat = ingest(
       store,
       bottom.id,
-      ["---", "verdict: verified", "draft: true", "pr: https://example.com/demo/pull/2", "---", "", "Synthetic note."].join("\n"),
+      ["---", "verdict: verified", "draft: true", "pr: https://github.com/example-org/demo-board/pull/2", "---", "", "Synthetic note."].join("\n"),
       {},
       false,
     );
@@ -206,6 +206,41 @@ describe("foundry flow", () => {
     expect(apiWins.ok).toBe(true);
     if (apiWins.ok) expect(apiWins.warning).toBeUndefined();
     expect(store.findSpec(upper.id)?.state).toBe("verified");
+
+    const again = ingest(store, upper.id, report(true), { probe: () => ({ ok: true, draft: false }) }, false);
+    expect(again.ok).toBe(false);
+    if (!again.ok) {
+      expect(again.error).toBe("not_draft");
+      expect(again.message).toMatch(/GitHub says/);
+    }
+    expect(store.findSpec(upper.id)?.state).toBe("verified");
+  });
+
+  test("a caller-supplied version that is stale returns 409 and dispatch writes intake only after the lock", () => {
+    const store = tempStore();
+    const made = createIdea(store, "trivia scoring", false);
+    if (!made.ok) throw new Error("create");
+    const id = (made.data as Idea).id;
+    const stale = restate(store, id, planner, false, 0);
+    expect(stale.ok).toBe(false);
+    if (!stale.ok) expect(stale.status).toBe(409);
+    expect(store.findIdea(id)?.state).toBe("raw");
+    expect(restate(store, id, planner, false, 1).ok).toBe(true);
+    approve(store, id, "Ship the smallest slice", false);
+    decompose(store, id, planner, false);
+    const gated = gate(store, id, false);
+    if (!gated.ok) throw new Error(JSON.stringify(gated));
+    const bottom = store.load().specs.find((spec) => spec.ideaId === id && spec.index === 1);
+    if (!bottom) throw new Error("missing spec");
+    const refused = dispatch(store, bottom.id, false, 0);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.status).toBe(409);
+    expect(store.readIntake()).toEqual([]);
+    const sent = dispatch(store, bottom.id, false, bottom.version);
+    expect(sent.ok).toBe(true);
+    expect(store.readIntake()).toEqual([
+      { idea: bottom.title, source: "foundry", target: "example-org/demo-board", n: 3 },
+    ]);
   });
 
   test("seed puts five ideas on the board", () => {

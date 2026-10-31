@@ -13,6 +13,7 @@ import {
   seedDemo,
   type CommandResult,
 } from "./commands.js";
+import { DomainError, prUrl } from "./domain.js";
 import { FixturePlanner } from "./planner.js";
 import { renderReport } from "./packet.js";
 import { Store } from "./store.js";
@@ -21,6 +22,11 @@ import { mermaid, edgesFromTla } from "./statechart.js";
 const BLOCKED = new Set(["merge", "deploy", "send", "ship", "email", "slack", "publish"]);
 
 type Body = Record<string, unknown>;
+
+function suppliedVersion(body: Body): number | undefined {
+  const raw = typeof body.recordVersion === "number" ? body.recordVersion : body.version;
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : undefined;
+}
 
 function send(res: ServerResponse, status: number, payload: unknown, type = "application/json; charset=utf-8"): void {
   const recorded =
@@ -112,28 +118,53 @@ export async function startServer(options: { store: Store; port: number; seed?: 
         const id = ideaAction[1] ?? "";
         const action = ideaAction[2];
         const body = await readBody(req);
-        if (action === "restate") return send(res, 200, restate(store, id, planner, false));
-        if (action === "approve") return send(res, 200, approve(store, id, typeof body.note === "string" ? body.note : undefined, false));
-        if (action === "decompose") return send(res, 200, decompose(store, id, planner, false));
+        const version = suppliedVersion(body);
+        if (action === "restate") return send(res, 200, restate(store, id, planner, false, version));
+        if (action === "approve") return send(res, 200, approve(store, id, typeof body.note === "string" ? body.note : undefined, false, version));
+        if (action === "decompose") return send(res, 200, decompose(store, id, planner, false, version));
         if (action === "gate") {
           const advisory = await probePeerReview(process.env.FOUNDRY_REVIEW_URL ?? "http://127.0.0.1:4333/review", 150);
-          return send(res, 200, gate(store, id, false, advisory));
+          return send(res, 200, gate(store, id, false, advisory, version));
         }
-        return send(res, 200, park(store, id, false));
+        return send(res, 200, park(store, id, false, version));
       }
       const specAction = url.pathname.match(/^\/api\/spec\/(s-\d{4}-[1-6])\/(dispatch|ingest)$/);
       if (req.method === "POST" && specAction) {
         const id = specAction[1] ?? "";
         const action = specAction[2];
-        if (action === "dispatch") return send(res, 200, dispatch(store, id, false));
         const body = await readBody(req);
+        const version = suppliedVersion(body);
+        if (action === "dispatch") return send(res, 200, dispatch(store, id, false, version));
+        if (typeof body.draft !== "boolean") {
+          return send(res, 400, {
+            ok: false,
+            status: 400,
+            error: "missing_draft",
+            message: "Say whether the pull request is a draft.",
+            next: "Send draft: true or draft: false with a github.com pull request URL.",
+          });
+        }
+        if (typeof body.pr !== "string") {
+          return send(res, 400, {
+            ok: false,
+            status: 400,
+            error: "missing_pr",
+            message: "Ingest needs a pull request URL.",
+            next: "Pass pr as https://github.com/<owner>/<repo>/pull/<number>.",
+          });
+        }
+        try {
+          prUrl(body.pr);
+        } catch (error) {
+          const message = error instanceof DomainError ? error.message : "The pull request URL is not a github.com pull request.";
+          const next = error instanceof DomainError ? error.next : "Pass an https://github.com/<owner>/<repo>/pull/<number> URL.";
+          return send(res, 400, { ok: false, status: 400, error: "bad_pr", message, next });
+        }
         const spec = store.findSpec(id);
         const title = spec?.title ?? id;
         const verdict = body.verdict === "rejected" ? "rejected" : "verified";
-        const draft = body.draft !== false;
-        const pr = typeof body.pr === "string" ? body.pr : "https://example.com/demo/pull/1";
-        const report = renderReport({ verdict, draft, pr, title });
-        return send(res, 200, ingest(store, id, report, { draft, pr }, false));
+        const report = renderReport({ verdict, draft: body.draft, pr: body.pr, title });
+        return send(res, 200, ingest(store, id, report, { draft: body.draft, pr: body.pr, expectedVersion: version }, false));
       }
       send(res, 404, { ok: false, status: 404, error: "not_found", message: "No such route.", next: "Use /api/state, /api/statechart, or /api/idea." });
     } catch (error) {

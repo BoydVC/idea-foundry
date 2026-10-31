@@ -2,6 +2,7 @@ import {
   DomainError,
   IllegalTransition,
   type Finding,
+  type GateResult,
   type Idea,
   type Snapshot,
   type Spec,
@@ -20,7 +21,9 @@ import {
   version,
 } from "./domain.js";
 import { checkSpec, passed } from "./gates.js";
-import { buildPacket, parsePacket, parseReport, type ReportDoc } from "./packet.js";
+import { DEFAULT_TARGET, buildPacket, parsePacket, parseReport, parseTarget, type ReportDoc } from "./packet.js";
+import { checkFoundryModel } from "./tlc.js";
+import { join } from "node:path";
 import { lookupGithubDraft, resolveDraftStatus, type DraftProbe } from "./draft-status.js";
 import { SEED_TITLES, type Planner } from "./planner.js";
 import { Store, type StoreResult } from "./store.js";
@@ -56,6 +59,25 @@ function ok(data: unknown, extra?: { dryRun?: boolean; idempotent?: boolean; war
 
 function fail(status: number, error: string, message: string, next: string, warning?: string): CommandErr {
   return { ok: false, status, error, message, next, warning };
+}
+
+function stale(actual: number, expected: number | undefined): CommandErr | null {
+  if (expected === undefined || expected === actual) return null;
+  return fail(
+    409,
+    "conflict",
+    `Stale version. Expected ${expected} and found ${actual}.`,
+    "Re-read the record and retry with the current version.",
+  );
+}
+
+function applyTlc(gates: GateResult[], tlcOk: boolean): GateResult[] {
+  if (tlcOk) return gates;
+  return gates.map((gate) => {
+    if (gate.gate !== "G3") return gate;
+    const findings = [...gate.findings, { key: "g3:tlc", detail: "TLC did not pass model/foundry.tla." }];
+    return { gate: "G3", pass: false, findings };
+  });
 }
 
 function fromThrown(error: unknown): CommandErr {
@@ -164,9 +186,11 @@ export function createIdea(store: Store, title: string, dryRun: boolean): Comman
   }
 }
 
-export function restate(store: Store, id: string, planner: Planner, dryRun: boolean): CommandResult {
+export function restate(store: Store, id: string, planner: Planner, dryRun: boolean, expectedVersion?: number): CommandResult {
   const idea = store.findIdea(id);
   if (!idea) return missingIdea(id);
+  const blocked = stale(idea.version, expectedVersion);
+  if (blocked) return blocked;
   if (idea.state !== "raw") {
     if (hasRestatement(idea)) return ok(idea, { idempotent: true, dryRun });
     try {
@@ -213,9 +237,11 @@ export function restate(store: Store, id: string, planner: Planner, dryRun: bool
   }
 }
 
-export function approve(store: Store, id: string, note: string | undefined, dryRun: boolean): CommandResult {
+export function approve(store: Store, id: string, note: string | undefined, dryRun: boolean, expectedVersion?: number): CommandResult {
   const idea = store.findIdea(id);
   if (!idea) return missingIdea(id);
+  const blocked = stale(idea.version, expectedVersion);
+  if (blocked) return blocked;
   if (idea.state === "approved" || idea.state === "specced" || idea.state === "gated" || idea.state === "verified") {
     return ok(idea, { idempotent: true, dryRun });
   }
@@ -255,9 +281,11 @@ export function approve(store: Store, id: string, note: string | undefined, dryR
   }
 }
 
-export function decompose(store: Store, id: string, planner: Planner, dryRun: boolean): CommandResult {
+export function decompose(store: Store, id: string, planner: Planner, dryRun: boolean, expectedVersion?: number): CommandResult {
   const idea = store.findIdea(id);
   if (!idea) return missingIdea(id);
+  const blocked = stale(idea.version, expectedVersion);
+  if (blocked) return blocked;
   const snap = store.load();
   if (idea.state === "specced" || idea.state === "gated" || idea.state === "verified") {
     return ok({ idea, specs: specsForIdea(snap, idea) }, { idempotent: true, dryRun });
@@ -350,9 +378,12 @@ export async function probePeerReview(url: string, timeoutMs: number): Promise<A
   }
 }
 
-export function gate(store: Store, id: string, dryRun: boolean, advisory?: Advisory): CommandResult {
+export function gate(store: Store, id: string, dryRun: boolean, advisory?: Advisory, expectedVersion?: number): CommandResult {
   const idea = store.findIdea(id);
   if (!idea) return missingIdea(id);
+  const blocked = stale(idea.version, expectedVersion);
+  if (blocked) return blocked;
+  const tlc = checkFoundryModel();
   if (idea.state !== "specced" && idea.state !== "gated") {
     return fail(422, "illegal_transition", `Cannot gate from ${idea.state}.`, "Run `foundry decompose <id>` first.");
   }
@@ -367,7 +398,7 @@ export function gate(store: Store, id: string, dryRun: boolean, advisory?: Advis
     if (spec.state === "dispatched" || spec.state === "verified" || spec.state === "rejected" || spec.state === "parked") {
       return spec;
     }
-    const gates = checkSpec(spec, specs);
+    const gates = applyTlc(checkSpec(spec, specs), tlc.ok);
     for (const item of gates) {
       if (!item.pass) findings.push(...item.findings);
     }
@@ -424,9 +455,11 @@ export function gate(store: Store, id: string, dryRun: boolean, advisory?: Advis
   }
 }
 
-export function dispatch(store: Store, id: string, dryRun: boolean): CommandResult {
+export function dispatch(store: Store, id: string, dryRun: boolean, expectedVersion?: number): CommandResult {
   const spec = store.findSpec(id);
   if (!spec) return missingSpec(id);
+  const blocked = stale(spec.version, expectedVersion);
+  if (blocked) return blocked;
   if (spec.state === "dispatched" || spec.state === "verified") {
     if (spec.state === "verified") {
       return ok({ spec, idempotent: true }, { idempotent: true, dryRun });
@@ -445,20 +478,25 @@ export function dispatch(store: Store, id: string, dryRun: boolean): CommandResu
       return fromThrown(error);
     }
   }
-  const packet = buildPacket(spec);
+  const target = parseTarget(process.env.FOUNDRY_TARGET ?? DEFAULT_TARGET);
+  const packet = buildPacket(spec, target);
   const body = `${JSON.stringify(packet, null, 2)}\n`;
+  const packetPath = join(store.root, "packets", `${spec.id}.json`);
   if (dryRun) {
-    const preview = parseSpec(bump(spec, { state: "dispatched", packetPath: `packets/${spec.id}.json` }, store.now()));
+    const preview = parseSpec(bump(spec, { state: "dispatched", packetPath }, store.now()));
     return ok({ spec: preview, packet }, { dryRun: true });
   }
   try {
-    const packetPath = store.writePacket(spec.id, body);
-    const saved = store.transact({ ideas: [], specs: [{ id: spec.id, version: spec.version }] }, (snap) => {
-      const current = snap.specs.find((item) => item.id === spec.id);
-      if (!current || current.state !== "gated") return snap;
-      const next = parseSpec(bump(current, { state: transition(current.state, "dispatch"), packetPath }, store.now()));
-      return { ...snap, specs: snap.specs.map((item) => (item.id === next.id ? next : item)) };
-    });
+    const saved = store.transact(
+      { ideas: [], specs: [{ id: spec.id, version: spec.version }] },
+      (snap) => {
+        const current = snap.specs.find((item) => item.id === spec.id);
+        if (!current || current.state !== "gated") return snap;
+        const next = parseSpec(bump(current, { state: transition(current.state, "dispatch"), packetPath }, store.now()));
+        return { ...snap, specs: snap.specs.map((item) => (item.id === next.id ? next : item)) };
+      },
+      { packet: { id: spec.id, body }, intake: packet.intake },
+    );
     return fromStore(saved, (value) => ({
       spec: value.specs.find((item) => item.id === spec.id),
       packet,
@@ -489,11 +527,13 @@ export function ingest(
   store: Store,
   id: string,
   reportText: string,
-  overrides: { draft?: boolean; pr?: string; probe?: DraftProbe },
+  overrides: { draft?: boolean; pr?: string; probe?: DraftProbe; expectedVersion?: number },
   dryRun: boolean,
 ): CommandResult {
   const spec = store.findSpec(id);
   if (!spec) return missingSpec(id);
+  const blocked = stale(spec.version, overrides.expectedVersion);
+  if (blocked) return blocked;
   let report: ReportDoc;
   try {
     report = parseReport(reportText);
@@ -503,7 +543,11 @@ export function ingest(
   const reportDraft = overrides.draft === false || report.draft === false ? false : overrides.draft === true || report.draft;
   const prRaw = overrides.pr ?? report.pr;
   if (spec.state === "verified") {
-    return ok(spec, { idempotent: true, dryRun });
+    const storedPr = spec.prUrl;
+    const prForCheck = typeof prRaw === "string" && prRaw.length > 0 ? prRaw : storedPr;
+    const decided = resolveDraftStatus(reportDraft, prForCheck, overrides.probe ?? lookupGithubDraft);
+    if (!decided.draft) return fail(422, "not_draft", decided.message, decided.next, decided.warning);
+    return ok(spec, { idempotent: true, dryRun, warning: decided.warning });
   }
   if (spec.state === "rejected" && report.verdict === "rejected") {
     return ok(spec, { idempotent: true, dryRun });
@@ -517,7 +561,7 @@ export function ingest(
     const blocked = stackBlock(spec, siblings);
     if (blocked) return blocked;
     if (!prRaw) {
-      return fail(400, "missing_pr", "A verified ingest needs a pull request URL.", "Pass --pr https://example.com/demo/pull/1.");
+      return fail(400, "missing_pr", "A verified ingest needs a pull request URL.", "Pass --pr https://github.com/example-org/demo-board/pull/1.");
     }
   }
   const decided = resolveDraftStatus(reportDraft, typeof prRaw === "string" ? prRaw : undefined, overrides.probe ?? lookupGithubDraft);
@@ -577,10 +621,12 @@ export function ingest(
   }
 }
 
-export function park(store: Store, id: string, dryRun: boolean): CommandResult {
+export function park(store: Store, id: string, dryRun: boolean, expectedVersion?: number): CommandResult {
   const idea = store.findIdea(id);
   const spec = idea ? undefined : store.findSpec(id);
   if (!idea && !spec) return missingIdea(id);
+  const blocked = stale((idea ?? spec)!.version, expectedVersion);
+  if (blocked) return blocked;
   if (idea) {
     if (idea.state === "parked") return ok(idea, { idempotent: true, dryRun });
     try {

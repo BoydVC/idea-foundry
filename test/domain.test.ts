@@ -70,7 +70,7 @@ describe("transition", () => {
         ],
         state: "verified",
         packetPath: "packets/s-0001-1.json",
-        prUrl: "https://example.com/demo/pull/1",
+        prUrl: "https://github.com/example-org/demo-board/pull/1",
         draft: false,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -82,8 +82,9 @@ describe("transition", () => {
     expect(ideaId("i-0007")).toBe("i-0007");
     expect(() => ideaId("s-0007-1")).toThrow(/idea id/);
     expect(() => specId("i-0007")).toThrow(/spec id/);
-    expect(prUrl("https://example.com/demo/pull/4")).toContain("https://");
-    expect(() => prUrl("http://example.com/demo/pull/4")).toThrow(/https/);
+    expect(prUrl("https://github.com/example-org/demo-board/pull/4")).toContain("github.com");
+    expect(() => prUrl("https://example.com/demo/pull/4")).toThrow(/github.com/);
+    expect(() => prUrl("http://github.com/example-org/demo-board/pull/4")).toThrow(/github.com/);
   });
 
   test("rejects a title that looks like contact data", () => {

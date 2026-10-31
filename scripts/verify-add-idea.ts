@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { chromium } from "@playwright/test";
 import { startServer } from "../src/server.js";
@@ -35,6 +36,12 @@ try {
   const merge = await fetch(`${running.url}/api/merge`, { method: "POST" });
   lines.push(`merge ${merge.status}`);
   if (merge.status !== 403) throw new Error("merge was not forbidden");
+  const pii = spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/pii-scan.ts"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  lines.push((pii.stdout ?? "").trim());
+  if (pii.status !== 0) throw new Error((pii.stderr || pii.stdout || "pii scan failed").trim());
   lines.push("ok");
 } catch (error) {
   failed = true;

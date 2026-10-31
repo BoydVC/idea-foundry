@@ -32,10 +32,11 @@ function download(target) {
 }
 
 const model = process.argv[2] ?? "foundry";
+const config = process.argv[3] ?? model;
 if (!existsSync(jar)) await download(jar);
 const result = spawnSync(
   "java",
-  ["-XX:+UseParallelGC", "-Xmx512m", "-jar", jar, "-workers", "1", "-config", `${model}.cfg`, `${model}.tla`],
+  ["-XX:+UseParallelGC", "-Xmx512m", "-jar", jar, "-workers", "1", "-config", `${config}.cfg`, `${model}.tla`],
   { cwd: join(root, "model"), encoding: "utf8" },
 );
 process.stdout.write(result.stdout ?? "");

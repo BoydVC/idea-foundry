@@ -1,6 +1,27 @@
 import { DomainError, type IdeaId, type PrUrl, type Spec, type SpecId, prUrl, specId, ideaId } from "./domain.js";
 
 export const FORBID = ["merge", "deploy", "send"] as const;
+export const DEFAULT_TARGET = "example-org/demo-board";
+const TARGET = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+export type IntakeLine = {
+  idea: string;
+  source: "foundry";
+  target: string;
+  n: 3;
+};
+
+export function parseTarget(value: string): string {
+  const target = value.trim();
+  if (!TARGET.test(target)) {
+    throw new DomainError(
+      "bad_target",
+      "The intake target must look like owner/repo.",
+      "Pass a target such as example-org/demo-board.",
+    );
+  }
+  return target;
+}
 
 export type ArenaPacket = {
   protocol: "dd-intake/v1";
@@ -16,6 +37,7 @@ export type ArenaPacket = {
   landsAfter: SpecId | null;
   requiresDraftPr: true;
   forbid: readonly ["merge", "deploy", "send"];
+  intake: IntakeLine;
 };
 
 export type ReportDoc = {
@@ -29,7 +51,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function buildPacket(spec: Spec): ArenaPacket {
+export function buildPacket(spec: Spec, target = DEFAULT_TARGET): ArenaPacket {
   return {
     protocol: "dd-intake/v1",
     command: "intake",
@@ -44,6 +66,12 @@ export function buildPacket(spec: Spec): ArenaPacket {
     landsAfter: spec.landsAfter,
     requiresDraftPr: true,
     forbid: FORBID,
+    intake: {
+      idea: spec.title,
+      source: "foundry",
+      target: parseTarget(target),
+      n: 3,
+    },
   };
 }
 
@@ -62,6 +90,15 @@ export function parsePacket(input: unknown): ArenaPacket {
     throw new DomainError("bad_packet", "The packet must forbid merge, deploy, and send.", "Keep the forbid list from dispatch.");
   }
   const landsRaw = input.landsAfter;
+  const intake = input.intake;
+  if (!isRecord(intake) || intake.source !== "foundry" || intake.n !== 3 || typeof intake.idea !== "string") {
+    throw new DomainError(
+      "bad_packet",
+      "The packet needs an intake line with idea, source, target, and n.",
+      "Dispatch the spec again so intake.jsonl is written with the packet.",
+    );
+  }
+  const target = parseTarget(String(intake.target));
   return {
     protocol: "dd-intake/v1",
     command: "intake",
@@ -76,6 +113,7 @@ export function parsePacket(input: unknown): ArenaPacket {
     landsAfter: landsRaw === null ? null : specId(String(landsRaw)),
     requiresDraftPr: true,
     forbid: FORBID,
+    intake: { idea: String(intake.idea), source: "foundry", target, n: 3 },
   };
 }
 
