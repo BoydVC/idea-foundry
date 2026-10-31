@@ -14,6 +14,7 @@ import {
   type CommandResult,
 } from "./commands.js";
 import { DomainError, prUrl } from "./domain.js";
+import { pipelineHealth } from "./health.js";
 import { FixturePlanner } from "./planner.js";
 import { renderReport } from "./packet.js";
 import { Store } from "./store.js";
@@ -84,7 +85,14 @@ export async function startServer(options: { store: Store; port: number; seed?: 
       if (req.method === "GET" && url.pathname === "/api/health") {
         const address = server.address();
         const port = address && typeof address === "object" ? address.port : options.port;
-        send(res, 200, { ok: true, service: "idea-foundry", port, ideas: store.load().ideas.length });
+        const snap = store.load();
+        send(res, 200, {
+          ok: true,
+          service: "idea-foundry",
+          port,
+          ideas: snap.ideas.length,
+          pipeline: pipelineHealth(snap),
+        });
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/state") {

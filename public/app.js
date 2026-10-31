@@ -179,6 +179,36 @@ function renderLessons(state) {
   }
 }
 
+function renderHealth(health) {
+  const root = document.querySelector("#health-stats");
+  if (!root) return;
+  const pipe = health && health.pipeline;
+  root.replaceChildren();
+  if (!pipe) return;
+  const states = el("p", { "data-testid": "health-states" });
+  for (const phase of PHASES) states.append(el("span", { class: "chip", text: `${phase} ${pipe.ideasByState[phase] || 0}` }));
+  const rates = ["G1", "G2", "G3"]
+    .map((id) => {
+      const row = pipe.gatePassRates[id];
+      const label = !row || row.rate === null ? "n/a" : `${Math.round(row.rate * 100)}%`;
+      return `${id} ${label}`;
+    })
+    .join(" · ");
+  const mean = pipe.meanMinutesIdeaToVerified === null ? "n/a" : `${pipe.meanMinutesIdeaToVerified} min`;
+  const card = (title, node) => {
+    const article = el("article");
+    article.append(el("h3", { text: title }));
+    article.append(node);
+    return article;
+  };
+  root.append(
+    card("Ideas by state", states),
+    card("Gate pass rates", el("p", { text: rates, "data-testid": "health-gates" })),
+    card("Mean time idea to verified", el("p", { text: mean, "data-testid": "health-mean" })),
+    card("Lessons promoted", el("p", { text: String(pipe.lessonsPromoted), "data-testid": "health-lessons" })),
+  );
+}
+
 function renderChart(source, counts) {
   chartSrc.textContent = source;
   const edges = [];
@@ -235,6 +265,7 @@ async function refresh(keep) {
   renderBoard(state);
   renderDetail(state);
   renderLessons(state);
+  renderHealth(health);
   renderChart(source, counts);
   return state;
 }

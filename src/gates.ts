@@ -70,8 +70,24 @@ export function checkG3(
   return result("G3", findings);
 }
 
+export function sharedTouchFindings(
+  spec: { id: string; touch: readonly string[] },
+  siblings: readonly { id: string; touch: readonly string[] }[],
+): Finding[] {
+  const findings: Finding[] = [];
+  for (const file of spec.touch) {
+    for (const other of siblings) {
+      if (other.id === spec.id) continue;
+      if (!other.touch.includes(file)) continue;
+      findings.push({ key: "g1:blast", detail: `${file} is also touched by ${other.id}.` });
+    }
+  }
+  return findings;
+}
+
 export function checkSpec(spec: Spec, siblings: readonly Spec[]): GateResult[] {
-  return [checkG1(spec), checkG2(spec), checkG3(spec, siblings)];
+  const base = checkG1(spec);
+  return [result("G1", [...base.findings, ...sharedTouchFindings(spec, siblings)]), checkG2(spec), checkG3(spec, siblings)];
 }
 
 export function passed(gates: readonly GateResult[]): boolean {

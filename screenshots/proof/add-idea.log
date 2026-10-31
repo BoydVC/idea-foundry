@@ -1,10 +1,10 @@
-doctor 200 {"ok":true,"service":"idea-foundry","port":4460,"ideas":5}
-state {"id":"i-0006","version":1,"title":"unit converter card","labels":[],"createdAt":"2026-10-31T14:56:53.452Z","updatedAt":"2026-10-31T14:56:53.452Z","state":"raw"}
+doctor 200 {"ok":true,"service":"idea-foundry","port":4460,"ideas":5,"pipeline":{"ideasByState":{"raw":1,"restated":1,"approved":1,"specced":1,"gated":1,"dispatched":0,"verified":0,"rejected":0,"parked":0},"gatePassRates":{"G1":{"pass":3,"total":3,"rate":1},"G2":{"pass":3,"total":3,"rate":1},"G3":{"pass":3,"total":3,"rate":1}},"meanMinutesIdeaToVerified":null,"lessonsPromoted":1}}
+state {"id":"i-0006","version":1,"title":"unit converter card","labels":[],"createdAt":"2026-10-31T15:27:00.780Z","updatedAt":"2026-10-31T15:27:00.780Z","state":"raw"}
 merge 403
 {
   "ok": true,
-  "files": 69,
+  "files": 75,
   "denylist": true,
-  "frames": 129
+  "frames": 125
 }
 ok

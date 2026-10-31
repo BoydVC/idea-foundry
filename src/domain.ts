@@ -20,6 +20,8 @@ export const EVENTS = [
   "gate_fail",
   "dispatch",
   "verify",
+  "unverify",
+  "reopen",
   "reject",
   "park",
   "close",
@@ -78,7 +80,7 @@ const STATE_NEXT: Record<Phase, string> = {
   specced: "Run `foundry gate <id>`.",
   gated: "Run `foundry dispatch <spec-id>` on a gated spec.",
   dispatched: "Run `foundry ingest <spec-id> --report <file> --pr <url>` with a draft pull request.",
-  verified: "Nothing to run. This record is verified.",
+  verified: "Re-ingest the spec. A closed or published pull request leaves verified.",
   rejected: "Nothing to run. This record is rejected.",
   parked: "Nothing to run. This record is parked.",
 };
@@ -199,6 +201,38 @@ export function transition(state: Phase, event: EventName): Phase {
         case "specced":
         case "gated":
         case "verified":
+        case "rejected":
+        case "parked":
+          throw new IllegalTransition(state, event);
+        default:
+          return assertNever(state);
+      }
+    case "unverify":
+      switch (state) {
+        case "verified":
+          return "dispatched";
+        case "raw":
+        case "restated":
+        case "approved":
+        case "specced":
+        case "gated":
+        case "dispatched":
+        case "rejected":
+        case "parked":
+          throw new IllegalTransition(state, event);
+        default:
+          return assertNever(state);
+      }
+    case "reopen":
+      switch (state) {
+        case "verified":
+          return "gated";
+        case "raw":
+        case "restated":
+        case "approved":
+        case "specced":
+        case "gated":
+        case "dispatched":
         case "rejected":
         case "parked":
           throw new IllegalTransition(state, event);

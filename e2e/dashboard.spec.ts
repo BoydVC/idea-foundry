@@ -4,10 +4,13 @@ test("phone width keeps the board on the page", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Idea Foundry" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pipeline health" })).toBeVisible();
+  await expect(page.getByTestId("health-states")).toContainText("raw");
+  await expect(page.getByTestId("health-lessons")).toHaveText("1");
   await expect(page.getByTestId("board")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Statechart" })).toBeVisible();
   await expect(page.getByTestId("invariants")).toContainText("DispatchRequiresGate");
-  await expect(page.getByRole("heading", { name: "Lessons" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lessons", exact: true })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 });

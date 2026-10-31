@@ -38,7 +38,14 @@ npm run foundry -- ingest s-0001-1 --report report.md --pr https://github.com/ex
 
 Every command prints one JSON object. Add `--dry-run` to preview a write. A stale version returns status 409. The `next` field says what to run after an error.
 
-`ingest` accepts only `https://github.com/<owner>/<repo>/pull/<number>`. It asks the GitHub API whether that pull request is a draft, including when the spec is already verified. When the API answers, that answer wins. When the API is unreachable, ingest uses the report line and returns a warning. Pass `--version` or `--record-version` to send the record version you read. A mismatch returns 409. `foundry gate` runs TLC on `model/foundry.tla` and fails the gate when TLC fails. `foundry dispatch` appends `{idea, source, target, n}` to `intake.jsonl` only after the compare-and-swap succeeds.
+`ingest` accepts only `https://github.com/<owner>/<repo>/pull/<number>`. It asks the GitHub API whether that pull request is a draft, including when the spec is already verified. When the API answers, that answer wins. When GitHub says the pull request is closed or no longer a draft, re-ingest moves that spec from verified back to dispatched and reopens a verified idea. An offline or non-GitHub answer does not un-verify. When the API is unreachable, ingest uses the report line and returns a warning. Pass `--version` or `--record-version` to send the record version you read. A mismatch returns 409. `foundry gate` runs TLC on `model/foundry.tla`, fails the gate when TLC fails, and fails a spec that shares a touch path with another spec in the stack. `foundry dispatch` appends `{idea, source, target, n}` to `intake.jsonl` only after the compare-and-swap succeeds.
+
+`foundry import` reads a JSON file (`bookmarks` or `notes`) or a markdown file of `#` headings and restates each item into one line: a problem and a done-when. The repo fixtures are synthetic.
+
+```bash
+npm run foundry -- import fixtures/bookmarks.json
+npm run foundry -- import fixtures/notes.md
+```
 
 ## Checks
 

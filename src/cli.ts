@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { createIdea, approve, decompose, dispatch, gate, ingest, park, probePeerReview, restate, seedDemo } from "./commands.js";
+import { createIdea, approve, decompose, dispatch, gate, importNotes, ingest, park, probePeerReview, restate, seedDemo } from "./commands.js";
 import { SEED_TITLES, FixturePlanner } from "./planner.js";
 import { Store } from "./store.js";
 
@@ -54,6 +54,7 @@ const HELP = {
       "foundry dispatch s-0001-1",
       "foundry ingest s-0001-1 --report report.md --pr https://github.com/example-org/demo-board/pull/1",
       "foundry park i-0001",
+      "foundry import fixtures/bookmarks.json",
       "foundry seed",
       "foundry dashboard",
     ],
@@ -123,6 +124,21 @@ export async function main(argv: string[]): Promise<number> {
       case "park":
         result = park(store, pos[0] ?? "", flags.dryRun, flags.version);
         break;
+      case "import": {
+        const file = pos[0];
+        if (!file) {
+          result = {
+            ok: false,
+            status: 400,
+            error: "missing_file",
+            message: "Import needs a JSON or markdown file.",
+            next: "Run `foundry import fixtures/bookmarks.json`.",
+          };
+          break;
+        }
+        result = importNotes(store, store.readText(file), planner, flags.dryRun);
+        break;
+      }
       case "seed":
         if (flags.dryRun) {
           result = { ok: true, dryRun: true, data: { titles: SEED_TITLES } };

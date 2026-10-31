@@ -24,7 +24,9 @@ const pause = (ms: number) => page.waitForTimeout(ms);
 try {
   await page.goto(running.url);
   await page.getByRole("heading", { name: "Idea Foundry" }).waitFor();
-  await pause(1200);
+  await page.getByTestId("health-lessons").waitFor();
+  await page.getByTestId("pipeline-health").scrollIntoViewIfNeeded();
+  await pause(700);
   await page.screenshot({ path: "screenshots/01-board.png" });
 
   await page.getByTestId("add-idea-title").fill("unit converter card");
@@ -71,12 +73,15 @@ try {
   }
   await page.getByTestId("detail").locator(".mono").first().getByText("verified").waitFor();
   await page.getByTestId("banner").scrollIntoViewIfNeeded();
-  await pause(900);
+  await pause(700);
   await page.screenshot({ path: "screenshots/04-verified.png" });
+  await page.getByTestId("pipeline-health").scrollIntoViewIfNeeded();
+  await page.getByTestId("health-mean").waitFor();
+  await pause(800);
   await page.getByTestId("statechart").scrollIntoViewIfNeeded();
-  await pause(1500);
+  await pause(900);
   await page.locator("#lessons").scrollIntoViewIfNeeded();
-  await pause(1000);
+  await pause(700);
 } finally {
   const video = page.video();
   await context.close();

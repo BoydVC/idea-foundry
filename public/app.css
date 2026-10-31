@@ -27,7 +27,7 @@ button, input, select {
   color: inherit;
 }
 
-.top, .add, .banner, .board, .detail, .chart-wrap, .lessons-wrap {
+.top, .add, .banner, .health-wrap, .board, .detail, .chart-wrap, .lessons-wrap {
   width: min(1180px, calc(100% - 32px));
   margin-left: auto;
   margin-right: auto;
@@ -143,9 +143,43 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .card strong { display: block; margin-top: 4px; font-size: 15px; line-height: 1.25; }
 
-.detail, .chart-wrap, .lessons-wrap {
+.detail, .chart-wrap, .lessons-wrap, .health-wrap {
   margin-top: 18px;
   padding-top: 8px;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.health-grid article {
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 10px;
+}
+
+.health-grid h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.health-grid p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.chip {
+  display: inline-block;
+  margin: 0 6px 6px 0;
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
 }
 
 .actions, .lanes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

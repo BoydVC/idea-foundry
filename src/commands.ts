@@ -26,7 +26,8 @@ import { type Advisory } from "./review.js";
 import { checkFoundryModel } from "./tlc.js";
 import { join } from "node:path";
 import { lookupGithubDraft, resolveDraftStatus, type DraftProbe } from "./draft-status.js";
-import { SEED_TITLES, type Planner } from "./planner.js";
+import { draftOf, parseImportFile } from "./import-notes.js";
+import { SEED_TITLES, type Planner, type Restatement } from "./planner.js";
 import { Store, type StoreResult } from "./store.js";
 
 export type CommandOk = {
@@ -187,7 +188,14 @@ export function createIdea(store: Store, title: string, dryRun: boolean): Comman
   }
 }
 
-export function restate(store: Store, id: string, planner: Planner, dryRun: boolean, expectedVersion?: number): CommandResult {
+export function restate(
+  store: Store,
+  id: string,
+  planner: Planner,
+  dryRun: boolean,
+  expectedVersion?: number,
+  draft?: Restatement,
+): CommandResult {
   const idea = store.findIdea(id);
   if (!idea) return missingIdea(id);
   const blocked = stale(idea.version, expectedVersion);
@@ -202,7 +210,7 @@ export function restate(store: Store, id: string, planner: Planner, dryRun: bool
   }
   let plan;
   try {
-    plan = planner.restate(idea.title);
+    plan = draft ?? planner.restate(idea.title);
     if (plan.questions.length !== 3) {
       return fail(500, "bad_plan", "The planner must return 3 questions.", "Use the fixture planner.");
     }
@@ -491,6 +499,68 @@ export function dispatch(store: Store, id: string, dryRun: boolean, expectedVers
   }
 }
 
+function unverify(
+  store: Store,
+  spec: Extract<Spec, { state: "verified" }>,
+  decided: { message: string; next: string; warning?: string },
+  dryRun: boolean,
+): CommandResult {
+  const snap = store.load();
+  const siblings = snap.specs.filter((item) => item.stackId === spec.stackId);
+  const higher = siblings.filter((item) => item.index > spec.index && item.state === "verified");
+  if (higher.length > 0) {
+    return fail(
+      422,
+      "stack_order",
+      `Un-verify ${higher.map((item) => item.id).join(", ")} before ${spec.id}.`,
+      "Stacks leave verified from the top.",
+      decided.warning,
+    );
+  }
+  const now = store.now();
+  let nextSpec: Spec;
+  try {
+    nextSpec = parseSpec(bump(spec, { state: transition(spec.state, "unverify") }, now));
+  } catch (error) {
+    return fromThrown(error);
+  }
+  const idea = snap.ideas.find((item) => item.id === spec.ideaId);
+  let nextIdea = idea;
+  if (idea?.state === "verified") {
+    try {
+      nextIdea = parseIdea(bump(idea, { state: transition(idea.state, "reopen") }, now));
+    } catch (error) {
+      return fromThrown(error);
+    }
+  }
+  if (dryRun) return ok({ spec: nextSpec, idea: nextIdea, unverified: true }, { dryRun: true, warning: decided.warning });
+  const expectIdeas = nextIdea && idea && nextIdea.version !== idea.version ? [{ id: idea.id, version: idea.version }] : [];
+  try {
+    const saved = store.transact({ ideas: expectIdeas, specs: [{ id: spec.id, version: spec.version }] }, (current) => {
+      const fresh = current.specs.find((item) => item.id === spec.id);
+      if (!fresh || fresh.state !== "verified") return current;
+      const written = parseSpec(bump(fresh, { state: transition(fresh.state, "unverify") }, store.now()));
+      let ideas = current.ideas;
+      const currentIdea = ideas.find((item) => item.id === fresh.ideaId);
+      if (currentIdea?.state === "verified") {
+        const reopened = parseIdea(bump(currentIdea, { state: transition(currentIdea.state, "reopen") }, store.now()));
+        ideas = ideas.map((item) => (item.id === reopened.id ? reopened : item));
+      }
+      return { ...current, ideas, specs: current.specs.map((item) => (item.id === written.id ? written : item)) };
+    });
+    const result = fromStore(saved, (value) => ({
+      spec: value.specs.find((item) => item.id === spec.id),
+      idea: value.ideas.find((item) => item.id === spec.ideaId),
+      unverified: true,
+      reason: decided.message,
+    }));
+    if (result.ok && decided.warning) return { ...result, warning: decided.warning };
+    return result;
+  } catch (error) {
+    return fromThrown(error);
+  }
+}
+
 function stackBlock(spec: Spec, specs: readonly Spec[]): CommandErr | null {
   if (spec.landsAfter === null) return null;
   const below = specs.find((item) => item.id === spec.landsAfter);
@@ -531,8 +601,9 @@ export function ingest(
     const storedPr = spec.prUrl;
     const prForCheck = typeof prRaw === "string" && prRaw.length > 0 ? prRaw : storedPr;
     const decided = resolveDraftStatus(reportDraft, prForCheck, overrides.probe ?? lookupGithubDraft);
-    if (!decided.draft) return fail(422, "not_draft", decided.message, decided.next, decided.warning);
-    return ok(spec, { idempotent: true, dryRun, warning: decided.warning });
+    if (decided.draft) return ok(spec, { idempotent: true, dryRun, warning: decided.warning });
+    if (decided.warning) return fail(422, "not_draft", decided.message, decided.next, decided.warning);
+    return unverify(store, spec, decided, dryRun);
   }
   if (spec.state === "rejected" && report.verdict === "rejected") {
     return ok(spec, { idempotent: true, dryRun });
@@ -644,6 +715,33 @@ export function park(store: Store, id: string, dryRun: boolean, expectedVersion?
   } catch (error) {
     return fromThrown(error);
   }
+}
+
+export function importNotes(store: Store, text: string, planner: Planner, dryRun: boolean): CommandResult {
+  let notes;
+  try {
+    notes = parseImportFile(text);
+  } catch (error) {
+    return fromThrown(error);
+  }
+  if (notes.length === 0) {
+    return fail(400, "empty_import", "The file has no notes.", "Add a heading or a notes list, then import again.");
+  }
+  const drafted = notes.map((note) => ({ title: note.title, ...draftOf(note.title, note.note) }));
+  if (dryRun) return ok({ count: drafted.length, ideas: drafted }, { dryRun: true });
+  const saved: unknown[] = [];
+  for (const item of drafted) {
+    const made = createIdea(store, item.title, false);
+    if (!made.ok) return made;
+    const idea = made.data as Idea;
+    const restated = restate(store, idea.id, planner, false, idea.version, {
+      restatement: item.restatement,
+      questions: item.questions,
+    });
+    if (!restated.ok) return restated;
+    saved.push(restated.data);
+  }
+  return ok({ count: saved.length, ideas: saved });
 }
 
 export function noteFinding(store: Store, key: string, detail: string): CommandResult {

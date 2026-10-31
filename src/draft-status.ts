@@ -9,7 +9,7 @@ export const OFFLINE_WARNING = "GitHub API was unreachable. Using the report lin
 
 export const BAD_BODY_WARNING = "GitHub API returned no draft flag. Using the report line.";
 
-export type DraftProbeResult = { ok: true; draft: boolean } | { ok: false; warning: string };
+export type DraftProbeResult = { ok: true; draft: boolean; closed?: boolean } | { ok: false; warning: string };
 
 export type DraftProbe = (pr: string) => DraftProbeResult;
 
@@ -17,22 +17,42 @@ export function resolveDraftStatus(
   reportDraft: boolean,
   pr: string | undefined,
   probe: DraftProbe,
-): { draft: boolean; warning?: string; message: string; next: string } {
+): { draft: boolean; closed: boolean; warning?: string; message: string; next: string } {
   const message = "Ingest refuses a pull request that is not a draft.";
   const next = "Open the pull request as a draft, then ingest again.";
   if (typeof pr !== "string" || pr.length === 0) {
-    return { draft: reportDraft, message, next };
+    return { draft: reportDraft, closed: false, message, next };
   }
   const probed = probe(pr);
-  if (!probed.ok) return { draft: reportDraft, warning: probed.warning, message, next };
+  if (!probed.ok) return { draft: reportDraft, closed: false, warning: probed.warning, message, next };
+  if (probed.closed) {
+    return {
+      draft: false,
+      closed: true,
+      message: "GitHub says this pull request is closed.",
+      next: "Open a new draft pull request, then ingest again.",
+    };
+  }
   if (!probed.draft) {
     return {
       draft: false,
+      closed: false,
       message: "GitHub says this pull request is not a draft.",
       next: "Mark the pull request as a draft, then ingest again.",
     };
   }
-  return { draft: true, message, next };
+  return { draft: true, closed: false, message, next };
+}
+
+export function parsePullStatus(text: string): DraftProbeResult {
+  let parsed: { draft?: unknown; state?: unknown };
+  try {
+    parsed = JSON.parse(text) as { draft?: unknown; state?: unknown };
+  } catch {
+    return { ok: false, warning: BAD_BODY_WARNING };
+  }
+  if (typeof parsed.draft !== "boolean") return { ok: false, warning: BAD_BODY_WARNING };
+  return { ok: true, draft: parsed.draft, closed: parsed.state === "closed" };
 }
 
 export function lookupGithubDraft(pr: string): DraftProbeResult {
@@ -43,12 +63,10 @@ export function lookupGithubDraft(pr: string): DraftProbeResult {
   const number = match[3] ?? "";
   const ran = spawnSync(
     "gh",
-    ["api", "--method", "GET", `repos/${owner}/${repo}/pulls/${number}`, "--jq", ".draft"],
+    ["api", "--method", "GET", `repos/${owner}/${repo}/pulls/${number}`, "--jq", "{draft:.draft,state:.state}"],
     { encoding: "utf8", timeout: 8000 },
   );
   if (ran.error || ran.status !== 0) return { ok: false, warning: OFFLINE_WARNING };
   const text = (ran.stdout ?? "").trim();
-  if (text === "true") return { ok: true, draft: true };
-  if (text === "false") return { ok: true, draft: false };
-  return { ok: false, warning: BAD_BODY_WARNING };
+  return parsePullStatus(text);
 }

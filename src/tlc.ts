@@ -27,16 +27,34 @@ function jarReady(): boolean {
   return moved.status === 0 && spawnSync("test", ["-f", jar]).status === 0;
 }
 
+function withTlcLock<T>(body: () => T): T {
+  const lock = join(root, "tools", "tlc-run.lockdir");
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (spawnSync("mkdir", [lock]).status === 0) {
+      try {
+        return body();
+      } finally {
+        spawnSync("rmdir", [lock]);
+      }
+    }
+    spawnSync("sleep", ["0.05"]);
+  }
+  return body();
+}
+
 export function checkFoundryModel(): { ok: boolean; detail: string } {
   if (cached) return cached;
   if (!jarReady()) return { ok: false, detail: "tla2tools.jar is not available." };
-  const ran = spawnSync(
-    "java",
-    ["-XX:+UseParallelGC", "-Xmx512m", "-jar", jar, "-workers", "1", "-config", "foundry.cfg", "foundry.tla"],
-    { cwd: join(root, "model"), encoding: "utf8" },
-  );
-  const detail = `${ran.stdout ?? ""}\n${ran.stderr ?? ""}`.trim();
-  const ok = ran.status === 0 && detail.includes("No error has been found");
-  if (ok) cached = { ok: true, detail };
-  return { ok, detail };
+  return withTlcLock(() => {
+    if (cached) return cached;
+    const ran = spawnSync(
+      "java",
+      ["-XX:+UseParallelGC", "-Xmx512m", "-jar", jar, "-workers", "1", "-config", "foundry.cfg", "foundry.tla"],
+      { cwd: join(root, "model"), encoding: "utf8" },
+    );
+    const detail = `${ran.stdout ?? ""}\n${ran.stderr ?? ""}`.trim();
+    const ok = ran.status === 0 && detail.includes("No error has been found");
+    if (ok) cached = { ok: true, detail };
+    return { ok, detail };
+  });
 }

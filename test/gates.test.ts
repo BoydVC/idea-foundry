@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { checkG1, checkG2, checkG3 } from "../src/gates.js";
+import { checkG1, checkG2, checkG3, sharedTouchFindings } from "../src/gates.js";
 
 const good = {
   id: "s-0001-2" as const,
@@ -44,6 +44,15 @@ describe("gates", () => {
 
   test("G3 passes a draft-only spec that names the spec below it", () => {
     expect(checkG3(good, siblings).pass).toBe(true);
+  });
+
+  test("a shared touch path is a blast-radius finding", () => {
+    const other = { id: "s-0001-1" as const, touch: ["src/weather-widget/rules.ts", "src/weather-widget/rules.test.ts"] };
+    const self = { id: "s-0001-2" as const, touch: ["src/weather-widget/rules.ts"] };
+    expect(sharedTouchFindings(self, [other, self])).toEqual([
+      { key: "g1:blast", detail: "src/weather-widget/rules.ts is also touched by s-0001-1." },
+    ]);
+    expect(sharedTouchFindings(self, [self])).toEqual([]);
   });
 
   test("G3 fails when the spec orders a merge or skips its predecessor", () => {

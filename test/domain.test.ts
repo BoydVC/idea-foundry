@@ -31,6 +31,8 @@ describe("transition", () => {
       "restated park parked",
       "specced gate_pass gated",
       "specced park parked",
+      "verified reopen gated",
+      "verified unverify dispatched",
     ]);
   });
 
