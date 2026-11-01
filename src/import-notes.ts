@@ -58,6 +58,24 @@ function noteFromRow(row: unknown): { title: string; note: string } {
   return { title, note };
 }
 
+function isBareBookmarkExport(rows: unknown[]): boolean {
+  if (rows.length === 0) return false;
+  return rows.every((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+    const record = row as Record<string, unknown>;
+    return typeof record.id === "string" && typeof record.text === "string" && !("title" in record);
+  });
+}
+
+function rejectBareBookmarkExport(rows: unknown[]): void {
+  if (!isBareBookmarkExport(rows)) return;
+  throw new DomainError(
+    "bad_import",
+    "This file is an X bookmark export. Use `foundry import --from <file>`.",
+    "Run `foundry import --from fixtures/x-bookmarks.json`.",
+  );
+}
+
 function fromJson(text: string): { title: string; note: string }[] {
   let parsed: unknown;
   try {
@@ -65,7 +83,10 @@ function fromJson(text: string): { title: string; note: string }[] {
   } catch {
     throw new DomainError("bad_import", "The import file is not valid JSON.", "Fix the JSON, or use markdown headings.");
   }
-  if (Array.isArray(parsed)) return parsed.map(noteFromRow);
+  if (Array.isArray(parsed)) {
+    rejectBareBookmarkExport(parsed);
+    return parsed.map(noteFromRow);
+  }
   if (!parsed || typeof parsed !== "object") {
     throw new DomainError("bad_import", "JSON import needs a notes or bookmarks list.", "Use {\"bookmarks\":[{\"title\",\"note\"}]}.");
   }
@@ -75,6 +96,7 @@ function fromJson(text: string): { title: string; note: string }[] {
   if (notes === null && bookmarks === null) {
     throw new DomainError("bad_import", "JSON import needs a notes or bookmarks list.", "Use {\"bookmarks\":[{\"title\",\"note\"}]}.");
   }
+  if (bookmarks) rejectBareBookmarkExport(bookmarks);
   return [...(notes ?? []), ...(bookmarks ?? [])].map(noteFromRow);
 }
 

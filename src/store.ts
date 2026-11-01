@@ -163,6 +163,30 @@ export type IntakeLine = {
   n: 3;
 };
 
+export type QuarantineCounts = {
+  events: number;
+  ideas: number;
+  lessons: number;
+  intake: number;
+};
+
+export function quarantineWarning(counts: QuarantineCounts): string | undefined {
+  const total = counts.events + counts.ideas + counts.lessons + counts.intake;
+  if (total === 0) return undefined;
+  return `Quarantined lines: events ${counts.events}, ideas ${counts.ideas}, lessons ${counts.lessons}, intake ${counts.intake}.`;
+}
+
+function intakeKey(line: string): string {
+  const row = JSON.parse(line) as IntakeLine;
+  return JSON.stringify({ ts: row.ts, idea: row.idea, source: row.source, target: row.target, n: row.n });
+}
+
+function isIntake(value: unknown): value is IntakeLine {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.ts === "string" && typeof row.idea === "string" && row.source === "foundry" && typeof row.target === "string" && row.n === 3;
+}
+
 export type CommitSide = {
   packet?: { id: SpecId; body: string };
   intake?: IntakeLine;
@@ -377,12 +401,26 @@ export class Store {
   }
 
   readIntake(): IntakeLine[] {
-    const path = join(this.root, "intake.jsonl");
-    if (!existsSync(path)) return [];
-    return readFileSync(path, "utf8")
-      .split("\n")
-      .filter((line) => line.trim().length > 0)
-      .map((line) => JSON.parse(line) as IntakeLine);
+    return this.withLock(() => {
+      this.recover();
+      return repairJsonl(join(this.root, "intake.jsonl")).map((line) => JSON.parse(line) as IntakeLine);
+    });
+  }
+
+  quarantineCounts(): QuarantineCounts {
+    const count = (name: string) => {
+      const path = join(this.root, name);
+      if (!existsSync(path)) return 0;
+      return readFileSync(path, "utf8")
+        .split("\n")
+        .filter((line) => line.trim().length > 0).length;
+    };
+    return {
+      events: count("events.jsonl.torn"),
+      ideas: count("ideas.jsonl.torn"),
+      lessons: count("lessons.jsonl.torn"),
+      intake: count("intake.jsonl.torn"),
+    };
   }
 
   private appendIntake(line: IntakeLine): void {
@@ -393,7 +431,7 @@ export class Store {
     const dir = join(this.root, "packets");
     mkdirSync(dir, { recursive: true });
     const path = join(dir, `${id}.json`);
-    writeFileSync(path, body);
+    durableWrite(path, body);
     return path;
   }
 
@@ -453,6 +491,48 @@ export class Store {
     this.reconcile(join(this.root, "events.jsonl"), eventLines(snap));
     this.reconcile(join(this.root, "ideas.jsonl"), snap.ideas.map((idea) => JSON.stringify(idea)));
     this.reconcile(join(this.root, "lessons.jsonl"), snap.lessons.map((lesson) => JSON.stringify(lesson)));
+    this.reconcileIntake(snap);
+  }
+
+  private reconcileIntake(snap: Snapshot): void {
+    const path = join(this.root, "intake.jsonl");
+    const kept = repairJsonl(path);
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const line of kept) {
+      let key: string;
+      try {
+        key = intakeKey(line);
+      } catch {
+        continue;
+      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(line);
+    }
+    const missing: string[] = [];
+    for (const spec of snap.specs) {
+      if (spec.state !== "dispatched" && spec.state !== "verified") continue;
+      const packetPath = join(this.root, "packets", `${spec.id}.json`);
+      if (!existsSync(packetPath)) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(readFileSync(packetPath, "utf8"));
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== "object") continue;
+      const intake = (parsed as { intake?: unknown }).intake;
+      if (!isIntake(intake)) continue;
+      const line = JSON.stringify({ ts: intake.ts, idea: intake.idea, source: intake.source, target: intake.target, n: intake.n });
+      const key = intakeKey(line);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      missing.push(line);
+      unique.push(line);
+    }
+    if (missing.length === 0 && unique.length === kept.length) return;
+    durableWrite(path, unique.length === 0 ? "" : `${unique.join("\n")}\n`);
   }
 
   private reconcile(path: string, wanted: readonly string[]): void {

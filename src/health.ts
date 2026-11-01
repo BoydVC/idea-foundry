@@ -6,6 +6,20 @@ export type GateRate = {
   rate: number | null;
 };
 
+export type SpecCounts = {
+  gated: number;
+  dispatched: number;
+  verified: number;
+  rejected: number;
+};
+
+export type IdeaRollup = {
+  id: string;
+  state: string;
+  rollup: string;
+  specCounts: SpecCounts;
+};
+
 export type PipelineHealth = {
   ideasByState: Record<Phase, number>;
   gatePassRates: Record<GateId, GateRate>;
@@ -14,8 +28,40 @@ export type PipelineHealth = {
   specsVerified: number;
   specsRejected: number;
   ideasInProgress: number;
+  ideaRollups: IdeaRollup[];
   lessonsPromoted: number;
 };
+
+export function specCountsOf(specs: readonly { state?: string }[]): SpecCounts {
+  const counts: SpecCounts = { gated: 0, dispatched: 0, verified: 0, rejected: 0 };
+  for (const spec of specs) {
+    if (spec.state === "gated" || spec.state === "dispatched" || spec.state === "verified" || spec.state === "rejected") {
+      counts[spec.state] += 1;
+    }
+  }
+  return counts;
+}
+
+export function rollupLabel(state: string, specs: readonly { state?: string }[]): string {
+  if (state === "verified" || state === "rejected") return state;
+  const counts = specCountsOf(specs);
+  const allVerified = specs.length > 0 && specs.every((spec) => spec.state === "verified");
+  if (allVerified) return "verified";
+  if (counts.dispatched > 0 || counts.verified > 0) return "in progress";
+  return state;
+}
+
+export function presentState<T extends { ideas: readonly { id: string; state: string }[]; specs: readonly { ideaId: string; state: string }[] }>(
+  snap: T,
+): T {
+  return {
+    ...snap,
+    ideas: snap.ideas.map((idea) => {
+      const family = snap.specs.filter((spec) => spec.ideaId === idea.id);
+      return { ...idea, rollup: rollupLabel(idea.state, family), specCounts: specCountsOf(family) };
+    }),
+  };
+}
 
 function emptyRate(): GateRate {
   return { pass: 0, total: 0, rate: null };
@@ -71,14 +117,16 @@ export function pipelineHealth(snap: {
   const meanMinutesSpecToVerified =
     specMinutes.length === 0 ? null : round1(specMinutes.reduce((sum, value) => sum + value, 0) / specMinutes.length);
 
-  let ideasInProgress = 0;
+  const ideaRollups: IdeaRollup[] = [];
   for (const idea of snap.ideas) {
-    if (idea.state !== "gated" || !idea.id) continue;
+    if (!idea.id) continue;
     const family = snap.specs.filter((spec) => spec.ideaId === idea.id);
-    if (family.length === 0) continue;
-    const moving = family.some((spec) => spec.state === "verified" || spec.state === "dispatched");
-    const settled = family.every((spec) => spec.state === "verified");
-    if (moving && !settled) ideasInProgress += 1;
+    ideaRollups.push({
+      id: idea.id,
+      state: idea.state,
+      rollup: rollupLabel(idea.state, family),
+      specCounts: specCountsOf(family),
+    });
   }
 
   return {
@@ -88,7 +136,8 @@ export function pipelineHealth(snap: {
     meanMinutesSpecToVerified,
     specsVerified,
     specsRejected,
-    ideasInProgress,
+    ideasInProgress: ideaRollups.filter((idea) => idea.rollup === "in progress").length,
+    ideaRollups,
     lessonsPromoted: snap.lessons.length,
   };
 }

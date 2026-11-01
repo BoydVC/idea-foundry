@@ -100,16 +100,23 @@ function renderBoard(state) {
       card.append(el("span", { class: "id", text: idea.id }));
       card.append(el("strong", { text: idea.title }));
       const specs = specsFor(state, idea);
-      const verified = specs.filter((spec) => spec.state === "verified").length;
-      const rejected = specs.filter((spec) => spec.state === "rejected").length;
-      const moving = specs.some((spec) => spec.state === "verified" || spec.state === "dispatched");
+      const counts = idea.specCounts ?? {
+        gated: specs.filter((spec) => spec.state === "gated").length,
+        dispatched: specs.filter((spec) => spec.state === "dispatched").length,
+        verified: specs.filter((spec) => spec.state === "verified").length,
+        rejected: specs.filter((spec) => spec.state === "rejected").length,
+      };
+      const moving = counts.verified > 0 || counts.dispatched > 0;
       const settled = specs.length > 0 && specs.every((spec) => spec.state === "verified");
-      const rollup = idea.state === "gated" && moving && !settled ? "in progress" : idea.state;
+      const rollup = idea.rollup ?? (idea.state === "gated" && moving && !settled ? "in progress" : idea.state);
       card.append(
         el("span", {
           class: "id",
           "data-testid": `idea-outcome-${idea.id}`,
-          text: specs.length === 0 ? idea.state : `${rollup} · ${verified} verified · ${rejected} rejected`,
+          text:
+            specs.length === 0
+              ? idea.state
+              : `${rollup} · ${counts.verified} verified · ${counts.rejected} rejected · gated ${counts.gated} · dispatched ${counts.dispatched}`,
         }),
       );
       card.addEventListener("click", () => {
@@ -242,6 +249,11 @@ function renderHealth(health) {
   const states = el("p", { "data-testid": "health-states" });
   for (const phase of PHASES) states.append(el("span", { class: "chip", text: `${phase} ${pipe.ideasByState[phase] || 0}` }));
   states.append(el("span", { class: "chip", "data-testid": "health-in-progress", text: `in progress ${pipe.ideasInProgress || 0}` }));
+  const quarantined = health && health.quarantined;
+  const torn = quarantined ? (quarantined.events || 0) + (quarantined.ideas || 0) + (quarantined.lessons || 0) + (quarantined.intake || 0) : 0;
+  if (torn > 0) {
+    states.append(el("span", { class: "chip", "data-testid": "health-quarantine", text: `quarantine ${torn}` }));
+  }
   const rates = ["G0", "G1", "G2", "G3"]
     .map((id) => {
       const row = pipe.gatePassRates[id];

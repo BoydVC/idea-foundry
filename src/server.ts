@@ -14,11 +14,11 @@ import {
   type CommandResult,
 } from "./commands.js";
 import { DomainError, prUrl } from "./domain.js";
-import { pipelineHealth } from "./health.js";
+import { pipelineHealth, presentState } from "./health.js";
 import { foundryPort } from "./port.js";
 import { selectPlanner } from "./planners/llm.js";
 import { renderReport } from "./packet.js";
-import { Store } from "./store.js";
+import { Store, quarantineWarning } from "./store.js";
 import { mermaid, edgesFromTla } from "./statechart.js";
 
 const BLOCKED = new Set(["merge", "deploy", "send", "ship", "email", "slack", "publish"]);
@@ -89,17 +89,21 @@ export async function startServer(options: { store: Store; port: number; seed?: 
         const address = server.address();
         const port = address && typeof address === "object" ? address.port : options.port;
         const snap = store.load();
+        const quarantined = store.quarantineCounts();
+        const warning = quarantineWarning(quarantined);
         send(res, 200, {
           ok: true,
           service: "idea-foundry",
           port,
           ideas: snap.ideas.length,
           pipeline: pipelineHealth(snap),
+          quarantined,
+          ...(warning ? { warning } : {}),
         });
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/state") {
-        send(res, 200, { ok: true, ...store.load() });
+        send(res, 200, { ok: true, ...presentState(store.load()) });
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/statechart") {

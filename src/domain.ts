@@ -399,7 +399,23 @@ export function prUrl(raw: string): PrUrl {
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 
-const TITLE_CONTROLS = /[\u0000-\u001F\u007F\u200B-\u200D\u202A-\u202E\u2066-\u2069\uFEFF]/;
+const TITLE_CONTROLS = /[\u0000-\u001F\u007F\u200B\u200C\u202A-\u202E\u2066-\u2069\uFEFF]/;
+
+function pictographBeside(chars: string[], index: number, direction: -1 | 1): boolean {
+  let cursor = index + direction;
+  while (chars[cursor] === "\uFE0F") cursor += direction;
+  const neighbor = chars[cursor];
+  return neighbor !== undefined && /^\p{Extended_Pictographic}$/u.test(neighbor);
+}
+
+function zwjBreaksEmoji(title: string): boolean {
+  const chars = Array.from(title);
+  for (let index = 0; index < chars.length; index += 1) {
+    if (chars[index] !== "\u200D") continue;
+    if (!pictographBeside(chars, index, -1) || !pictographBeside(chars, index, 1)) return true;
+  }
+  return false;
+}
 
 export function normalizeTitle(raw: string): string {
   return raw
@@ -416,7 +432,7 @@ export function parseTitle(raw: unknown): string {
     throw new DomainError("bad_title", "The title must be a string.", "Try `foundry idea \"habit tracker export\"`.");
   }
   const normalized = raw.normalize("NFC");
-  if (TITLE_CONTROLS.test(normalized)) {
+  if (TITLE_CONTROLS.test(normalized) || zwjBreaksEmoji(normalized)) {
     throw new DomainError(
       "bad_title",
       "The title contains a control character, a bidi override, or a zero-width character.",

@@ -33,7 +33,7 @@ import { join } from "node:path";
 import { lookupGithubDraft, resolveDraftStatus, type DraftProbe } from "./draft-status.js";
 import { draftOf, parseBookmarkExport, parseImportFile } from "./import-notes.js";
 import { SEED_TITLES, type Planner, type Restatement } from "./planner.js";
-import { Store, type StoreResult } from "./store.js";
+import { Store, quarantineWarning, type StoreResult } from "./store.js";
 
 export type CommandOk = {
   ok: true;
@@ -1105,9 +1105,12 @@ export function weekly(store: Store, since: string): CommandResult {
     const target = process.env.FOUNDRY_TARGET ?? DEFAULT_TARGET;
     const backlog = draftBacklogFromEnv()(target);
     const targetOpenDrafts = backlog.ok ? backlog.drafts : null;
-    const result = ok(weeklyDigest(store.load(), since, targetOpenDrafts));
-    if (!backlog.ok) return { ...result, warning: WEEKLY_DRAFT_WARNING };
-    return result;
+    const snap = store.load();
+    const quarantined = store.quarantineCounts();
+    const warnings = [backlog.ok ? undefined : WEEKLY_DRAFT_WARNING, quarantineWarning(quarantined)].filter(
+      (item): item is string => item !== undefined,
+    );
+    return ok({ ...weeklyDigest(snap, since, targetOpenDrafts), quarantined }, warnings.length > 0 ? { warning: warnings.join(" ") } : undefined);
   } catch (error) {
     return fromThrown(error);
   }
