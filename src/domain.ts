@@ -399,7 +399,17 @@ export function prUrl(raw: string): PrUrl {
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 
-const TITLE_CONTROLS = /[\u0000-\u001F\u007F\u200B\u202A-\u202E\u2066-\u2069\uFEFF]/;
+const TITLE_CONTROLS = /[\u0000-\u001F\u007F-\u009F\u200B\u202A-\u202E\u2066-\u2069\uFEFF]/;
+
+const BLACK_FLAG = 0x1f3f4;
+const TAG_MIN = 0xe0020;
+const TAG_MAX = 0xe007f;
+const TAG_A = 0xe0061;
+const TAG_Z = 0xe007a;
+const TAG_CANCEL = 0xe007f;
+
+const INDIC_SCRIPT =
+  /^(?:\p{Script=Devanagari}|\p{Script=Bengali}|\p{Script=Gurmukhi}|\p{Script=Gujarati}|\p{Script=Oriya}|\p{Script=Tamil}|\p{Script=Telugu}|\p{Script=Kannada}|\p{Script=Malayalam})$/u;
 
 const ZWNJ_LETTER =
   /^(?:\p{Script=Arabic}|\p{Script=Devanagari}|\p{Script=Bengali}|\p{Script=Gurmukhi}|\p{Script=Gujarati}|\p{Script=Oriya}|\p{Script=Tamil}|\p{Script=Telugu}|\p{Script=Kannada}|\p{Script=Malayalam})$/u;
@@ -410,6 +420,59 @@ function isEmojiModifier(char: string | undefined): boolean {
 
 function isZwnjLetter(char: string | undefined): boolean {
   return char !== undefined && /^\p{L}$/u.test(char) && ZWNJ_LETTER.test(char);
+}
+
+function isIndicLetter(char: string | undefined): boolean {
+  return char !== undefined && /^\p{L}$/u.test(char) && INDIC_SCRIPT.test(char);
+}
+
+function isIndicMark(char: string | undefined): boolean {
+  return char !== undefined && /^\p{Mn}$/u.test(char) && INDIC_SCRIPT.test(char);
+}
+
+function codePoint(chars: string[], index: number): number {
+  return chars[index]?.codePointAt(0) ?? 0;
+}
+
+function flagTagEnd(chars: string[], start: number): number {
+  let cursor = start + 1;
+  let letters = 0;
+  while (cursor < chars.length) {
+    const point = codePoint(chars, cursor);
+    if (point >= TAG_A && point <= TAG_Z) {
+      letters += 1;
+      cursor += 1;
+      continue;
+    }
+    if (point === TAG_CANCEL && letters >= 2) return cursor + 1;
+    return start;
+  }
+  return start;
+}
+
+function strayTagCharacters(title: string): boolean {
+  const chars = Array.from(title);
+  let index = 0;
+  while (index < chars.length) {
+    const point = codePoint(chars, index);
+    if (point === BLACK_FLAG) {
+      const end = flagTagEnd(chars, index);
+      if (end > index) {
+        index = end;
+        continue;
+      }
+    }
+    if (point >= TAG_MIN && point <= TAG_MAX) return true;
+    index += 1;
+  }
+  return false;
+}
+
+function zwnjAfterVirama(chars: string[], index: number): boolean {
+  if (!isIndicLetter(chars[index + 1]) || !isIndicMark(chars[index - 1])) return false;
+  let cursor = index - 2;
+  while (isIndicMark(chars[cursor])) cursor -= 1;
+  return isIndicLetter(chars[cursor]);
 }
 
 function pictographBeside(chars: string[], index: number, direction: -1 | 1): boolean {
@@ -423,7 +486,9 @@ function zwnjBreaksScript(title: string): boolean {
   const chars = Array.from(title);
   for (let index = 0; index < chars.length; index += 1) {
     if (chars[index] !== "\u200C") continue;
-    if (!isZwnjLetter(chars[index - 1]) || !isZwnjLetter(chars[index + 1])) return true;
+    if (isZwnjLetter(chars[index - 1]) && isZwnjLetter(chars[index + 1])) continue;
+    if (zwnjAfterVirama(chars, index)) continue;
+    return true;
   }
   return false;
 }
@@ -452,10 +517,10 @@ export function parseTitle(raw: unknown): string {
     throw new DomainError("bad_title", "The title must be a string.", "Try `foundry idea \"habit tracker export\"`.");
   }
   const normalized = raw.normalize("NFC");
-  if (TITLE_CONTROLS.test(normalized) || zwjBreaksEmoji(normalized) || zwnjBreaksScript(normalized)) {
+  if (TITLE_CONTROLS.test(normalized) || zwjBreaksEmoji(normalized) || zwnjBreaksScript(normalized) || strayTagCharacters(normalized)) {
     throw new DomainError(
       "bad_title",
-      "The title contains a control character, a bidi override, or a zero-width character.",
+      "The title contains a control character, a bidi override, a tag character, or a zero-width character.",
       "Use a plain product name such as \"habit tracker export\".",
     );
   }
