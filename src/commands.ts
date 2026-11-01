@@ -1097,6 +1097,20 @@ export function correct(store: Store): CommandResult {
   return ok({ proposals, lessons }, { idempotent: proposals.every((item) => item.idempotent) });
 }
 
+export function listQuarantine(store: Store): CommandResult {
+  const files = store.quarantineFiles();
+  const counts = store.quarantineCounts();
+  const warning = quarantineWarning(counts, files);
+  return ok({ counts, files, warning }, warning ? { warning } : undefined);
+}
+
+export function clearQuarantine(store: Store): CommandResult {
+  const archived = store.archiveQuarantine();
+  const files = store.quarantineFiles();
+  const counts = store.quarantineCounts();
+  return ok({ counts, files, archived, idempotent: archived.length === 0 }, { idempotent: archived.length === 0 });
+}
+
 export function weekly(store: Store, since: string): CommandResult {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(since) || Number.isNaN(Date.parse(`${since}T00:00:00.000Z`))) {
     return fail(400, "bad_since", "weekly needs a YYYY-MM-DD date.", "Run `foundry weekly --since 2026-10-24`.");
@@ -1106,8 +1120,9 @@ export function weekly(store: Store, since: string): CommandResult {
     const backlog = draftBacklogFromEnv()(target);
     const targetOpenDrafts = backlog.ok ? backlog.drafts : null;
     const snap = store.load();
+    const files = store.quarantineFiles();
     const quarantined = store.quarantineCounts();
-    const warnings = [backlog.ok ? undefined : WEEKLY_DRAFT_WARNING, quarantineWarning(quarantined)].filter(
+    const warnings = [backlog.ok ? undefined : WEEKLY_DRAFT_WARNING, quarantineWarning(quarantined, files)].filter(
       (item): item is string => item !== undefined,
     );
     return ok({ ...weeklyDigest(snap, since, targetOpenDrafts), quarantined }, warnings.length > 0 ? { warning: warnings.join(" ") } : undefined);

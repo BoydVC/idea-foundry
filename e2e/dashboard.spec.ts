@@ -1,4 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 
 async function waitForHealth(url: string): Promise<void> {
@@ -159,5 +162,41 @@ test("two dashboards on 4440 and 4441 keep separate data", async ({ request }) =
     expect(left.ideas.some((idea) => idea.title === "side board widget")).toBe(false);
   } finally {
     child?.kill("SIGTERM");
+  }
+});
+
+test("a torn intake shows a quarantine warning on the board", async ({ page }) => {
+  const dir = mkdtempSync(join(tmpdir(), "foundry-torn-"));
+  writeFileSync(join(dir, "intake.jsonl.torn"), '{"ts":"2026-\n');
+  const child = spawn(process.execPath, ["node_modules/tsx/dist/cli.mjs", "src/server.ts"], {
+    env: {
+      ...process.env,
+      FOUNDRY_DATA: dir,
+      FOUNDRY_PORT: "4442",
+      PORT: "4442",
+      FOUNDRY_OPEN_DRAFTS: "0",
+      FOUNDRY_GITHUB_DRAFT: "offline",
+    },
+  });
+  try {
+    await waitForHealth("http://127.0.0.1:4442/api/health");
+    await page.goto("http://127.0.0.1:4442/");
+    const chip = page.getByTestId("health-quarantine");
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveClass(/warn/);
+    await expect(chip).toContainText("events 0");
+    await expect(chip).toContainText("ideas 0");
+    await expect(chip).toContainText("lessons 0");
+    await expect(chip).toContainText("intake 1");
+    await expect(chip).toContainText("intake.jsonl.torn");
+    const warning = page.getByTestId("health-quarantine-warning");
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText("Quarantined lines");
+    await expect(warning).toContainText("intake 1");
+    await expect(warning).toContainText(join(dir, "intake.jsonl.torn"));
+    const background = await chip.evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(background).not.toBe("rgba(0, 0, 0, 0)");
+  } finally {
+    child.kill("SIGTERM");
   }
 });

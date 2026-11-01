@@ -12,7 +12,7 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type Idea,
@@ -170,10 +170,21 @@ export type QuarantineCounts = {
   intake: number;
 };
 
-export function quarantineWarning(counts: QuarantineCounts): string | undefined {
+export type QuarantineFile = {
+  name: string;
+  path: string;
+  lines: number;
+};
+
+const TORN_LOGS = ["events.jsonl.torn", "ideas.jsonl.torn", "lessons.jsonl.torn", "intake.jsonl.torn"] as const;
+
+export function quarantineWarning(counts: QuarantineCounts, files: readonly QuarantineFile[] = []): string | undefined {
   const total = counts.events + counts.ideas + counts.lessons + counts.intake;
   if (total === 0) return undefined;
-  return `Quarantined lines: events ${counts.events}, ideas ${counts.ideas}, lessons ${counts.lessons}, intake ${counts.intake}.`;
+  const summary = `Quarantined lines: events ${counts.events}, ideas ${counts.ideas}, lessons ${counts.lessons}, intake ${counts.intake}.`;
+  const paths = files.filter((file) => file.lines > 0).map((file) => file.path);
+  if (paths.length === 0) return summary;
+  return `${summary} Torn lines are in ${paths.join(", ")}.`;
 }
 
 function intakeKey(line: string): string {
@@ -407,20 +418,39 @@ export class Store {
     });
   }
 
-  quarantineCounts(): QuarantineCounts {
-    const count = (name: string) => {
-      const path = join(this.root, name);
-      if (!existsSync(path)) return 0;
-      return readFileSync(path, "utf8")
+  quarantineFiles(): QuarantineFile[] {
+    return TORN_LOGS.map((name) => {
+      const path = resolve(this.root, name);
+      if (!existsSync(path)) return { name, path, lines: 0 };
+      const lines = readFileSync(path, "utf8")
         .split("\n")
         .filter((line) => line.trim().length > 0).length;
-    };
-    return {
-      events: count("events.jsonl.torn"),
-      ideas: count("ideas.jsonl.torn"),
-      lessons: count("lessons.jsonl.torn"),
-      intake: count("intake.jsonl.torn"),
-    };
+      return { name, path, lines };
+    });
+  }
+
+  quarantineCounts(): QuarantineCounts {
+    const files = this.quarantineFiles();
+    const lines = (prefix: string) => files.find((file) => file.name.startsWith(prefix))?.lines ?? 0;
+    return { events: lines("events"), ideas: lines("ideas"), lessons: lines("lessons"), intake: lines("intake") };
+  }
+
+  archiveQuarantine(): { name: string; from: string; to: string; lines: number }[] {
+    return this.withLock(() => {
+      const moved: { name: string; from: string; to: string; lines: number }[] = [];
+      for (const file of this.quarantineFiles()) {
+        if (file.lines === 0 || !existsSync(file.path)) continue;
+        const body = readFileSync(file.path, "utf8");
+        const chunk = body.endsWith("\n") ? body : `${body}\n`;
+        const archive = `${file.path}.archive`;
+        const prior = existsSync(archive) ? readFileSync(archive, "utf8") : "";
+        const next = prior.length === 0 ? chunk : `${prior.endsWith("\n") ? prior : `${prior}\n`}${chunk}`;
+        durableWrite(archive, next);
+        unlinkSync(file.path);
+        moved.push({ name: file.name, from: file.path, to: archive, lines: file.lines });
+      }
+      return moved;
+    });
   }
 
   private appendIntake(line: IntakeLine): void {

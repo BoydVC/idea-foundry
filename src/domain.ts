@@ -399,13 +399,33 @@ export function prUrl(raw: string): PrUrl {
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 
-const TITLE_CONTROLS = /[\u0000-\u001F\u007F\u200B\u200C\u202A-\u202E\u2066-\u2069\uFEFF]/;
+const TITLE_CONTROLS = /[\u0000-\u001F\u007F\u200B\u202A-\u202E\u2066-\u2069\uFEFF]/;
+
+const ZWNJ_LETTER =
+  /^(?:\p{Script=Arabic}|\p{Script=Devanagari}|\p{Script=Bengali}|\p{Script=Gurmukhi}|\p{Script=Gujarati}|\p{Script=Oriya}|\p{Script=Tamil}|\p{Script=Telugu}|\p{Script=Kannada}|\p{Script=Malayalam})$/u;
+
+function isEmojiModifier(char: string | undefined): boolean {
+  return char !== undefined && /^\p{Emoji_Modifier}$/u.test(char);
+}
+
+function isZwnjLetter(char: string | undefined): boolean {
+  return char !== undefined && /^\p{L}$/u.test(char) && ZWNJ_LETTER.test(char);
+}
 
 function pictographBeside(chars: string[], index: number, direction: -1 | 1): boolean {
   let cursor = index + direction;
-  while (chars[cursor] === "\uFE0F") cursor += direction;
+  while (chars[cursor] === "\uFE0F" || (direction < 0 && isEmojiModifier(chars[cursor]))) cursor += direction;
   const neighbor = chars[cursor];
   return neighbor !== undefined && /^\p{Extended_Pictographic}$/u.test(neighbor);
+}
+
+function zwnjBreaksScript(title: string): boolean {
+  const chars = Array.from(title);
+  for (let index = 0; index < chars.length; index += 1) {
+    if (chars[index] !== "\u200C") continue;
+    if (!isZwnjLetter(chars[index - 1]) || !isZwnjLetter(chars[index + 1])) return true;
+  }
+  return false;
 }
 
 function zwjBreaksEmoji(title: string): boolean {
@@ -432,7 +452,7 @@ export function parseTitle(raw: unknown): string {
     throw new DomainError("bad_title", "The title must be a string.", "Try `foundry idea \"habit tracker export\"`.");
   }
   const normalized = raw.normalize("NFC");
-  if (TITLE_CONTROLS.test(normalized) || zwjBreaksEmoji(normalized)) {
+  if (TITLE_CONTROLS.test(normalized) || zwjBreaksEmoji(normalized) || zwnjBreaksScript(normalized)) {
     throw new DomainError(
       "bad_title",
       "The title contains a control character, a bidi override, or a zero-width character.",

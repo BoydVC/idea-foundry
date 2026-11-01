@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { createIdea, approve, correct, decompose, dispatch, gate, importBookmarks, importNotes, ingest, park, probePeerReview, recheck, restate, seedDemo, weekly } from "./commands.js";
+import { createIdea, approve, clearQuarantine, correct, decompose, dispatch, gate, importBookmarks, importNotes, ingest, listQuarantine, park, probePeerReview, recheck, restate, seedDemo, weekly } from "./commands.js";
 import { DomainError } from "./domain.js";
 import { foundryPort } from "./port.js";
 import { selectPlanner } from "./planners/llm.js";
@@ -19,6 +19,8 @@ type Flags = {
   fresh: boolean;
   recheck: boolean;
   unverify: boolean;
+  list: boolean;
+  clear: boolean;
   version?: number;
   help: boolean;
 };
@@ -32,6 +34,8 @@ function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
     fresh: false,
     recheck: false,
     unverify: false,
+    list: false,
+    clear: false,
   };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -43,6 +47,8 @@ function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
     else if (arg === "--fresh") flags.fresh = true;
     else if (arg === "--recheck") flags.recheck = true;
     else if (arg === "--unverify") flags.unverify = true;
+    else if (arg === "--list") flags.list = true;
+    else if (arg === "--clear") flags.clear = true;
     else if (arg === "--no-draft") flags.draft = false;
     else if (arg === "--version" || arg === "--record-version") {
       const value = argv[i + 1];
@@ -83,6 +89,8 @@ const HELP = {
       "foundry import --from fixtures/x-bookmarks.json",
       "foundry correct",
       "foundry weekly --since 2026-10-24",
+      "foundry quarantine --list",
+      "foundry quarantine --clear",
       "foundry seed",
       "foundry dashboard",
     ],
@@ -203,6 +211,9 @@ export async function main(argv: string[]): Promise<number> {
           break;
         }
         result = weekly(store, flags.since);
+        break;
+      case "quarantine":
+        result = flags.clear ? clearQuarantine(store) : listQuarantine(store);
         break;
       case "seed":
         if (flags.dryRun && (flags.fresh || store.load().ideas.length === 0)) {

@@ -182,6 +182,16 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12px;
 }
 
+.chip.warn {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--stamp);
+  background: #f8ece6;
+  color: var(--stamp);
+  overflow-wrap: anywhere;
+}
+
 .actions, .lanes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 .lane {

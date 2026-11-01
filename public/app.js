@@ -251,8 +251,12 @@ function renderHealth(health) {
   states.append(el("span", { class: "chip", "data-testid": "health-in-progress", text: `in progress ${pipe.ideasInProgress || 0}` }));
   const quarantined = health && health.quarantined;
   const torn = quarantined ? (quarantined.events || 0) + (quarantined.ideas || 0) + (quarantined.lessons || 0) + (quarantined.intake || 0) : 0;
-  if (torn > 0) {
-    states.append(el("span", { class: "chip", "data-testid": "health-quarantine", text: `quarantine ${torn}` }));
+  if (torn > 0 && quarantined) {
+    const files = Array.isArray(health.quarantineFiles) ? health.quarantineFiles.filter((file) => file.lines > 0) : [];
+    const counts = `events ${quarantined.events || 0} · ideas ${quarantined.ideas || 0} · lessons ${quarantined.lessons || 0} · intake ${quarantined.intake || 0}`;
+    const paths = files.map((file) => file.path).join(", ");
+    states.append(el("span", { class: "chip warn", "data-testid": "health-quarantine", text: paths ? `quarantine ${counts} · ${paths}` : `quarantine ${counts}` }));
+    if (health.warning) states.append(el("span", { class: "chip warn", "data-testid": "health-quarantine-warning", text: health.warning }));
   }
   const rates = ["G0", "G1", "G2", "G3"]
     .map((id) => {

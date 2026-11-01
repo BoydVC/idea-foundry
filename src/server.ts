@@ -89,8 +89,9 @@ export async function startServer(options: { store: Store; port: number; seed?: 
         const address = server.address();
         const port = address && typeof address === "object" ? address.port : options.port;
         const snap = store.load();
+        const quarantineFiles = store.quarantineFiles();
         const quarantined = store.quarantineCounts();
-        const warning = quarantineWarning(quarantined);
+        const warning = quarantineWarning(quarantined, quarantineFiles);
         send(res, 200, {
           ok: true,
           service: "idea-foundry",
@@ -98,6 +99,7 @@ export async function startServer(options: { store: Store; port: number; seed?: 
           ideas: snap.ideas.length,
           pipeline: pipelineHealth(snap),
           quarantined,
+          quarantineFiles,
           ...(warning ? { warning } : {}),
         });
         return;
