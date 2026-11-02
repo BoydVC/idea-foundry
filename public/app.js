@@ -5,8 +5,13 @@ function proofOf(gate, spec) {
   if (gate.findings && gate.findings.length > 0) {
     return gate.findings.reduce((min, item) => Math.min(min, item.proof || 1), 5);
   }
-  const runnable = (spec.acceptance || []).some((command) => /^(node|npm|npx|tsc)(\s+\S+)+$/.test(command) && !/[;&|`$<>(){}!\n\r]/.test(command));
-  return runnable ? 4 : 1;
+  const local = (spec.acceptance || []).some((command) => {
+    if (!/^(node|npm|tsc)(\s+\S+)+$/.test(command) || /[;&|`$<>(){}!\n\r]/.test(command)) return false;
+    if (!command.startsWith("npm")) return true;
+    const sub = command.split(/\s+/)[1];
+    return sub === "test" || sub === "start" || sub === "run" || sub === "run-script";
+  });
+  return local ? 4 : 1;
 }
 
 function gateLine(gate, spec) {

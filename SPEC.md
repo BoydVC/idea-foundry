@@ -19,7 +19,9 @@ Gates follow the inverse trust pyramid:
 | G2 skills | Done-when, concrete verbs, synthetic-data clause. |
 | G3 human | Draft proof only. Merge is forbidden. |
 
-A spec that touches `src/store.ts` or `src/domain.ts` needs proof level 4: a runnable acceptance command. A finding that repeats becomes a lesson, and the gate stays red until that lesson has a check in `LESSON_CHECKS`. `foundry correct` only writes a proposal.
+G1 rejects a touch path with whitespace at either end, a non-ASCII Cc, Cf, or Zs character inside a segment, or text that is not NFC. Core files compare case-insensitively, so `SRC/Store.TS` is `src/store.ts`. `npx` is accepted only for a package in dependencies or devDependencies, and `--yes`, `-y`, and `-p` are forbidden. Proof level 4 is a local bin or an npm script.
+
+A spec that touches `src/store.ts` or `src/domain.ts` needs proof level 4: a local bin or an npm script. A finding that repeats becomes a lesson, and the gate stays red until that lesson has a check in `LESSON_CHECKS`. `foundry correct` only writes a proposal.
 
 ## Checks
 

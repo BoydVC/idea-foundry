@@ -26,6 +26,7 @@ export const LESSON_CHECKS: Record<string, (spec: LessonSpec, siblings: readonly
   "g1:acceptance": (spec) => checkG1(spec).findings.find((item) => item.key === "g1:acceptance") ?? null,
   "g1:touch": (spec) => checkG1(spec).findings.find((item) => item.key === "g1:touch") ?? null,
   "g1:touch-escape": (spec) => checkG1(spec).findings.find((item) => item.key === "g1:touch-escape") ?? null,
+  "g1:touch-invalid": (spec) => checkG1(spec).findings.find((item) => item.key === "g1:touch-invalid") ?? null,
   "g1:size": (spec) => checkG1(spec).findings.find((item) => item.key === "g1:size") ?? null,
   "g1:proof": (spec) => checkG1(spec).findings.find((item) => item.key === "g1:proof") ?? null,
   "g1:blast": (spec, siblings) => sharedTouchFindings(spec, siblings)[0] ?? null,

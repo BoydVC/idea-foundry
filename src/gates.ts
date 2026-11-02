@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { posix } from "node:path";
 import ts from "typescript";
 import type { Finding, GateResult, ProofLevel, Sketch, Spec, SpecId } from "./domain.js";
@@ -15,22 +16,58 @@ const VAGUE = /\b(improve|enhance|optimize|leverage|streamline|handle|manage)\b/
 const RUNNABLE = /^(node|npm|npx|tsc)(\s+\S+)+$/;
 const SHELL = /[;&|`$<>(){}!\n\r]/;
 const MERGE_ORDER = /\byou may merge\b|\bauto-merge\b|\bmerge the pull request\b/i;
+const NON_ASCII_MARK = /[\p{Cc}\p{Cf}\p{Zs}]/u;
+const NPM_SCRIPTS = new Set(["test", "start", "run", "run-script"]);
+const NPX_VALUE_FLAGS = new Set(["--call", "-c", "--npm", "--node-options", "--node-arg", "-n", "--cache", "--userconfig", "--registry", "--loglevel"]);
 
-export function canonicalTouch(file: string): string | null {
-  if (file.length === 0 || file.includes("\0")) return null;
-  const slashed = file.replace(/\\/g, "/").normalize("NFKC");
-  if (/^[A-Za-z]:/.test(slashed) || slashed.startsWith("//")) return null;
-  let decoded = slashed;
-  for (let pass = 0; pass < 3; pass += 1) {
-    try {
-      const next = decodeURIComponent(decoded);
-      if (next === decoded) break;
-      decoded = next.normalize("NFKC");
-    } catch {
-      return null;
+type Manifest = {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+};
+
+function declaredPackages(): ReadonlySet<string> {
+  const manifest = createRequire(import.meta.url)("../package.json") as Manifest;
+  return new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.devDependencies ?? {})]);
+}
+
+const DECLARED_PACKAGES = declaredPackages();
+
+type TouchInspect = { kind: "ok"; path: string } | { kind: "invalid" } | { kind: "escape" };
+
+function pathTextInvalid(value: string): boolean {
+  if (value.normalize("NFC") !== value || value !== value.trim()) return true;
+  for (const segment of value.split(/[\\/]/)) {
+    if (segment !== segment.trim()) return true;
+    for (const char of segment) {
+      const point = char.codePointAt(0) ?? 0;
+      if (point <= 0x7f) continue;
+      if (NON_ASCII_MARK.test(char)) return true;
     }
   }
-  if (decoded.includes("\0")) return null;
+  return false;
+}
+
+function inspectTouch(file: string): TouchInspect {
+  if (file.length === 0 || file.includes("\0")) return { kind: "escape" };
+  if (pathTextInvalid(file)) return { kind: "invalid" };
+  const slashed = file.replace(/\\/g, "/").normalize("NFKC");
+  if (pathTextInvalid(slashed)) return { kind: "invalid" };
+  if (/^[A-Za-z]:/.test(slashed) || slashed.startsWith("//")) return { kind: "escape" };
+  let decoded = slashed;
+  for (let pass = 0; pass < 3; pass += 1) {
+    let next: string;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return { kind: "escape" };
+    }
+    if (next === decoded) break;
+    if (next.includes("\0")) return { kind: "escape" };
+    if (pathTextInvalid(next)) return { kind: "invalid" };
+    decoded = next.normalize("NFKC");
+    if (pathTextInvalid(decoded)) return { kind: "invalid" };
+  }
+  if (decoded.includes("\0")) return { kind: "escape" };
   const normalized = posix.normalize(decoded);
   if (
     normalized === ".." ||
@@ -39,26 +76,85 @@ export function canonicalTouch(file: string): string | null {
     posix.isAbsolute(normalized) ||
     normalized.split("/").includes("..")
   ) {
-    return null;
+    return { kind: "escape" };
   }
   const trimmed = normalized.replace(/\/+$/, "");
-  return trimmed.length > 0 ? trimmed : null;
+  if (trimmed.length === 0) return { kind: "escape" };
+  if (pathTextInvalid(trimmed)) return { kind: "invalid" };
+  return { kind: "ok", path: trimmed };
+}
+
+export function canonicalTouch(file: string): string | null {
+  const found = inspectTouch(file);
+  return found.kind === "ok" ? found.path : null;
 }
 
 function result(gate: GateResult["gate"], findings: Finding[]): GateResult {
   return { gate, pass: findings.length === 0, findings };
 }
 
+function npxFlagBanned(arg: string): boolean {
+  if (arg === "--yes" || arg === "-y" || arg === "-p" || arg === "--package") return true;
+  if (arg.startsWith("--yes=") || arg.startsWith("--package=")) return true;
+  return /^-[yqpchnv]+$/.test(arg) && /[yp]/.test(arg);
+}
+
+function npxPackageName(token: string): string {
+  if (token.startsWith("@")) {
+    const slash = token.indexOf("/");
+    if (slash < 0) return token;
+    const versionAt = token.indexOf("@", slash + 1);
+    return versionAt === -1 ? token : token.slice(0, versionAt);
+  }
+  const versionAt = token.indexOf("@");
+  return versionAt === -1 ? token : token.slice(0, versionAt);
+}
+
+function npxAllowed(command: string): boolean {
+  const args = command.trim().split(/\s+/).slice(1);
+  if (args.some((arg) => npxFlagBanned(arg))) return false;
+  let packageName: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    if (arg === "--") break;
+    if (arg.startsWith("-")) {
+      if (!arg.includes("=") && NPX_VALUE_FLAGS.has(arg)) index += 1;
+      continue;
+    }
+    packageName = npxPackageName(arg);
+    break;
+  }
+  return packageName !== undefined && DECLARED_PACKAGES.has(packageName);
+}
+
+function blocksAcceptance(command: string): boolean {
+  if (SHELL.test(command)) return true;
+  return command.trim().split(/\s+/)[0] === "npx" && !npxAllowed(command);
+}
+
 export function isRunnable(command: string): boolean {
-  return RUNNABLE.test(command) && !SHELL.test(command);
+  if (!RUNNABLE.test(command) || SHELL.test(command)) return false;
+  return command.trim().split(/\s+/)[0] !== "npx" || npxAllowed(command);
+}
+
+function isLocalProof(command: string): boolean {
+  if (!isRunnable(command)) return false;
+  const parts = command.trim().split(/\s+/);
+  const bin = parts[0];
+  if (bin === "node" || bin === "tsc") return true;
+  if (bin === "npm") return NPM_SCRIPTS.has(parts[1] ?? "");
+  return false;
 }
 
 export function acceptanceProof(acceptance: readonly string[]): ProofLevel {
-  return acceptance.some((command) => isRunnable(command)) ? 4 : 1;
+  return acceptance.some((command) => isLocalProof(command)) ? 4 : 1;
 }
 
 export function touchesCore(touch: readonly string[]): boolean {
-  return touch.some((file) => CORE_FILES.has(canonicalTouch(file) ?? ""));
+  return touch.some((file) => {
+    const canon = canonicalTouch(file);
+    return canon !== null && CORE_FILES.has(canon.toLowerCase());
+  });
 }
 
 const sketchCache = new Map<string, { ok: boolean; detail: string }>();
@@ -124,17 +220,32 @@ export function checkG0(spec: { sketch?: Sketch }): GateResult {
 export function checkG1(spec: Pick<Spec, "acceptance" | "touch" | "maxLines">): GateResult {
   const findings: Finding[] = [];
   const runnable = spec.acceptance.some((command) => isRunnable(command));
-  if (!runnable || spec.acceptance.some((command) => SHELL.test(command))) {
+  if (!runnable || spec.acceptance.some((command) => blocksAcceptance(command))) {
     findings.push({
       key: "g1:acceptance",
-      detail: "Add one acceptance command that starts with node, npm, npx, or tsc and does not chain a shell.",
+      detail:
+        "Add one acceptance command that starts with node, npm, npx, or tsc and does not chain a shell. npx may only run a dependency or devDependency, and --yes, -y, and -p are forbidden.",
       proof: 1,
     });
   }
   if (spec.touch.length === 0) {
     findings.push({ key: "g1:touch", detail: "Add a touch map of the files this spec may change.", proof: 1 });
   }
-  if (spec.touch.some((path) => canonicalTouch(path) === null)) {
+  let invalid = false;
+  let escape = false;
+  for (const path of spec.touch) {
+    const found = inspectTouch(path);
+    if (found.kind === "invalid") invalid = true;
+    else if (found.kind === "escape") escape = true;
+  }
+  if (invalid) {
+    findings.push({
+      key: "g1:touch-invalid",
+      detail: "Keep every touch path in NFC, with no whitespace at either end and no Unicode control, space, or format character.",
+      proof: 2,
+    });
+  }
+  if (escape) {
     findings.push({ key: "g1:touch-escape", detail: "Keep every touch path inside the repo.", proof: 2 });
   }
   if (spec.maxLines > 400) {
@@ -143,7 +254,7 @@ export function checkG1(spec: Pick<Spec, "acceptance" | "touch" | "maxLines">): 
   if (touchesCore(spec.touch) && acceptanceProof(spec.acceptance) < 4) {
     findings.push({
       key: "g1:proof",
-      detail: "A spec that touches src/store.ts or src/domain.ts needs a runnable acceptance command (proof level 4).",
+      detail: "A spec that touches src/store.ts or src/domain.ts needs a local bin or an npm script (proof level 4).",
       proof: 1,
     });
   }
