@@ -1,0 +1,14 @@
+node_modules/
+vendor/
+dist/
+data/
+tools/*.jar
+.local/
+screenshots/raw/
+test-results/
+playwright-report/
+blob-report/
+*.webm
+.env
+*.tsbuildinfo
+data/e2e/

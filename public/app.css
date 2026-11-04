@@ -1,0 +1,233 @@
+:root {
+  --paper: #efe6d4;
+  --ink: #1d1a16;
+  --card: #fbf6ec;
+  --copper: #b45324;
+  --patina: #1f6b5c;
+  --stamp: #8e2d2d;
+  --line: #ddcfb8;
+  --muted: #6e6458;
+  --park: #8a8175;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    linear-gradient(180deg, rgba(180, 83, 36, 0.08), transparent 180px),
+    var(--paper);
+  font-family: "Liberation Serif", "DejaVu Serif", Georgia, serif;
+}
+
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+.top, .add, .banner, .health-wrap, .board, .detail, .chart-wrap, .lessons-wrap {
+  width: min(1180px, calc(100% - 32px));
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  padding: 28px 0 8px;
+  border-bottom: 4px solid var(--ink);
+}
+
+h1, h2, h3 { font-weight: 600; letter-spacing: 0; }
+
+h1 { margin: 0; font-size: 42px; line-height: 1; }
+
+h2 { margin: 0 0 12px; font-size: 22px; }
+
+.mark {
+  margin: 0 0 6px;
+  color: var(--copper);
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.port {
+  margin: 0;
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 18px;
+}
+
+.add {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  padding: 16px 0;
+}
+
+.add label { font-size: 14px; }
+
+.add input, .note, .pr {
+  border: 1px solid var(--ink);
+  background: var(--card);
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.add input { flex: 1; }
+
+button {
+  background: var(--ink);
+  color: var(--card);
+  border: 1px solid var(--ink);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--ink);
+}
+
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.banner {
+  border: 1px solid var(--stamp);
+  color: var(--stamp);
+  padding: 8px 12px;
+  background: #f8ece6;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(110px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.column {
+  min-height: 140px;
+  border-top: 3px solid var(--ink);
+}
+
+.column h3 {
+  margin: 8px 0;
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  margin-bottom: 8px;
+  padding: 8px;
+}
+
+.card.selected { border-color: var(--copper); box-shadow: inset 3px 0 0 var(--copper); }
+
+.card .id, .mono {
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card strong { display: block; margin-top: 4px; font-size: 15px; line-height: 1.25; }
+
+.detail, .chart-wrap, .lessons-wrap, .health-wrap {
+  margin-top: 18px;
+  padding-top: 8px;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.health-grid article {
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 10px;
+}
+
+.health-grid h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.health-grid p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.chip {
+  display: inline-block;
+  margin: 0 6px 6px 0;
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.actions, .lanes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.lane {
+  flex: 1 1 220px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 10px;
+}
+
+.lane .index {
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  color: var(--copper);
+  font-size: 12px;
+}
+
+.pass { color: var(--patina); }
+.fail { color: var(--stamp); }
+
+#statechart svg { width: 100%; height: auto; background: var(--card); border: 1px solid var(--line); }
+
+#statechart-src, .body {
+  white-space: pre-wrap;
+  background: #f4efe4;
+  border: 1px solid var(--line);
+  padding: 10px;
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lessons-wrap ol { margin: 0; padding-left: 18px; }
+
+.lessons-wrap li { margin: 6px 0; }
+
+.hint {
+  color: var(--muted);
+  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  h1 { font-size: 32px; }
+  .top { align-items: start; gap: 12px; }
+  .add { flex-wrap: wrap; }
+  .board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+}

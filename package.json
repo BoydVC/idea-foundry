@@ -1,0 +1,34 @@
+{
+  "name": "idea-foundry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turn a raw idea into an ordered stack of specs, gate them, and hand a draft arena packet to a runner.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "foundry": "./bin/foundry.js"
+  },
+  "scripts": {
+    "foundry": "tsx src/cli.ts",
+    "pipeline": "tsx scripts/pipeline.ts",
+    "dashboard": "tsx src/server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "tlc": "node scripts/tlc.mjs",
+    "tlc:mutant": "node scripts/tlc-mutant.mjs",
+    "statechart:check": "tsx scripts/check-statechart.ts",
+    "pii": "tsx scripts/pii-scan.ts",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm test && npm run statechart:check && npm run tlc && npm run tlc:mutant && npm run pii"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^22.10.2",
+    "fast-check": "^3.23.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

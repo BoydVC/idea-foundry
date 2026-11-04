@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Idea Foundry</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <p class="mark">Synthetic board</p>
+        <h1>Idea Foundry</h1>
+      </div>
+      <p class="port" id="port-label" data-testid="port-label">:4440</p>
+    </header>
+    <form id="add-form" class="add">
+      <label for="add-idea-title">New idea</label>
+      <input id="add-idea-title" data-testid="add-idea-title" maxlength="200" placeholder="habit tracker export" autocomplete="off" />
+      <button type="submit" data-testid="add-idea-submit">Add idea</button>
+    </form>
+    <p id="banner" class="banner" role="alert" data-testid="banner" hidden></p>
+    <section class="health-wrap" data-testid="pipeline-health">
+      <h2>Pipeline health</h2>
+      <div id="health-stats" class="health-grid" data-testid="health-stats"></div>
+    </section>
+    <section id="board" class="board" data-testid="board" aria-label="Idea board"></section>
+    <section id="detail" class="detail" data-testid="detail"></section>
+    <section class="chart-wrap">
+      <h2>Statechart</h2>
+      <p class="hint" data-testid="invariants">Checked by TLC: NoMergeState, VerifiedImpliesDraftPR, StackLandsBottomUp, CASNoLostUpdate, DispatchRequiresGate.</p>
+      <div id="statechart" data-testid="statechart"></div>
+      <pre id="statechart-src" data-testid="statechart-src"></pre>
+    </section>
+    <section class="lessons-wrap">
+      <h2>Lessons</h2>
+      <ol id="lessons" data-testid="lessons"></ol>
+    </section>
+    <script src="/app.js"></script>
+  </body>
+</html>

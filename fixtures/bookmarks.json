@@ -1,0 +1,16 @@
+{
+  "bookmarks": [
+    {
+      "title": "habit tracker export",
+      "note": "Write synthetic habit rows to a file and return the path."
+    },
+    {
+      "title": "weather widget",
+      "note": "Show a synthetic forecast on one card."
+    },
+    {
+      "title": "palette mixer",
+      "note": "Mix three synthetic colors and return the result."
+    }
+  ]
+}
