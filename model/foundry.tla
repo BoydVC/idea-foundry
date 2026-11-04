@@ -1,8 +1,8 @@
 ------------------------------ MODULE foundry ------------------------------
 EXTENDS Integers
 
-CONSTANT SkipGate, AllowMerge, LoseUpdate
-ASSUME SkipGate \in BOOLEAN /\ AllowMerge \in BOOLEAN /\ LoseUpdate \in BOOLEAN
+CONSTANT SkipGate, AllowMerge, LoseUpdate, UndoVerify
+ASSUME SkipGate \in BOOLEAN /\ AllowMerge \in BOOLEAN /\ LoseUpdate \in BOOLEAN /\ UndoVerify \in BOOLEAN
 
 VARIABLES idea, s1, s2, draft1, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone
 
@@ -127,6 +127,14 @@ Redraft2 ==
   /\ draft2 = FALSE
   /\ draft2' = TRUE
   /\ UNCHANGED <<idea, s1, s2, draft1, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
+
+\* event: reject
+RejectIdea ==
+  /\ idea = "gated"
+  /\ \/ s1 = "rejected"
+     \/ s2 = "rejected"
+  /\ idea' = "rejected"
+  /\ UNCHANGED <<s1, s2, draft1, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
 
 \* event: reject
 Reject1 ==
@@ -265,6 +273,14 @@ DropB ==
   /\ UNCHANGED <<idea, s1, s2, draft1, draft2, stored, commits, aRead, bRead, aDone, g1, g2>>
 
 
+\* event: done
+\* Stutter for end states so NoDeadlock holds. UNCHANGED vars, so this is not a chart edge.
+Done ==
+  /\ \/ idea \in {"rejected", "parked", "verified"}
+     \/ s1 \in {"rejected", "parked", "verified"}
+     \/ s2 \in {"rejected", "parked", "verified"}
+  /\ UNCHANGED vars
+
 \* Not a chart edge. Enabled only when SkipGate is true.
 SkipGateDispatch ==
   /\ SkipGate
@@ -280,6 +296,13 @@ MergeSpec ==
   /\ s1 \in {"dispatched", "verified", "gated"}
   /\ s1' = "merged"
   /\ UNCHANGED <<idea, s2, draft1, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
+
+\* Not a chart edge. Enabled only when UndoVerify is true.
+UndoVerifiedDraft ==
+  /\ UndoVerify
+  /\ s1 = "verified"
+  /\ draft1' = FALSE
+  /\ UNCHANGED <<idea, s1, s2, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
 
 \* Not a chart edge. Enabled only when LoseUpdate is true.
 DoubleCommit ==
@@ -309,6 +332,7 @@ Next ==
   \/ Unverify2
   \/ Redraft1
   \/ Redraft2
+  \/ RejectIdea
   \/ Reject1
   \/ Reject2
   \/ GateFail1
@@ -328,9 +352,11 @@ Next ==
   \/ CommitB
   \/ DropA
   \/ DropB
+  \/ Done
   \/ SkipGateDispatch
   \/ MergeSpec
   \/ DoubleCommit
+  \/ UndoVerifiedDraft
 
 Spec == Init /\ [][Next]_vars
 
@@ -363,6 +389,10 @@ NoMergeState ==
   /\ s2 # "merged"
 
 VerifiedImpliesDraftPR ==
+  /\ (s1 = "verified" => draft1)
+  /\ (s2 = "verified" => draft2)
+
+VerifiedIsFinal ==
   /\ (s1 = "verified" => draft1)
   /\ (s2 = "verified" => draft2)
 

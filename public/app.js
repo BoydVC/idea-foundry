@@ -1,4 +1,25 @@
 const PHASES = ["raw", "restated", "approved", "specced", "gated", "dispatched", "verified", "rejected", "parked"];
+const LAYER = { G0: "architecture", G1: "static", G2: "skills", G3: "human" };
+
+function proofOf(gate, spec) {
+  if (gate.findings && gate.findings.length > 0) {
+    return gate.findings.reduce((min, item) => Math.min(min, item.proof || 1), 5);
+  }
+  const local = (spec.acceptance || []).some((command) => {
+    if (!/^(node|npm|tsc)(\s+\S+)+$/.test(command) || /[;&|`$<>(){}!\n\r]/.test(command)) return false;
+    if (!command.startsWith("npm")) return true;
+    const sub = command.split(/\s+/)[1];
+    return sub === "test" || sub === "start" || sub === "run" || sub === "run-script";
+  });
+  return local ? 4 : 1;
+}
+
+function gateLine(gate, spec) {
+  const layer = LAYER[gate.gate] || "layer";
+  const proof = proofOf(gate, spec);
+  if (gate.pass) return `${gate.gate} pass · ${layer} · proof ${proof}`;
+  return `${gate.gate} fail · ${layer} · proof ${proof}: ${gate.findings.map((item) => item.detail).join(" ")}`;
+}
 const DEMO_PR = "https://github.com/example-org/demo-board/pull/1";
 
 const POS = {
@@ -73,7 +94,7 @@ function renderBoard(state) {
   board.replaceChildren();
   for (const phase of PHASES) {
     const column = el("div", { class: "column" });
-    const ideas = state.ideas.filter((idea) => idea.state === phase);
+    const ideas = state.ideas.filter((idea) => idea.state === phase).sort((a, b) => Number(a.id.slice(2)) - Number(b.id.slice(2)));
     column.append(el("h3", { text: `${phase} ${ideas.length}` }));
     for (const idea of ideas) {
       const card = el("button", {
@@ -83,6 +104,26 @@ function renderBoard(state) {
       });
       card.append(el("span", { class: "id", text: idea.id }));
       card.append(el("strong", { text: idea.title }));
+      const specs = specsFor(state, idea);
+      const counts = idea.specCounts ?? {
+        gated: specs.filter((spec) => spec.state === "gated").length,
+        dispatched: specs.filter((spec) => spec.state === "dispatched").length,
+        verified: specs.filter((spec) => spec.state === "verified").length,
+        rejected: specs.filter((spec) => spec.state === "rejected").length,
+      };
+      const moving = counts.verified > 0 || counts.dispatched > 0;
+      const settled = specs.length > 0 && specs.every((spec) => spec.state === "verified");
+      const rollup = idea.rollup ?? (idea.state === "gated" && moving && !settled ? "in progress" : idea.state);
+      card.append(
+        el("span", {
+          class: "id",
+          "data-testid": `idea-outcome-${idea.id}`,
+          text:
+            specs.length === 0
+              ? idea.state
+              : `${rollup} · ${counts.verified} verified · ${counts.rejected} rejected · gated ${counts.gated} · dispatched ${counts.dispatched}`,
+        }),
+      );
       card.addEventListener("click", () => {
         selected = idea.id;
         renderBoard(state);
@@ -105,6 +146,7 @@ function renderDetail(state) {
   const idea = state.ideas.find((item) => item.id === selected) || state.ideas[0];
   if (!idea) {
     detail.append(el("p", { text: "Add an idea to open a stack." }));
+    renderGates([]);
     return;
   }
   selected = idea.id;
@@ -132,7 +174,10 @@ function renderDetail(state) {
   detail.append(actions);
 
   const specs = specsFor(state, idea);
-  if (specs.length === 0) return;
+  if (specs.length === 0) {
+    renderGates([]);
+    return;
+  }
   const lanes = el("div", { class: "lanes", "data-testid": "lanes" });
   for (const spec of specs) {
     const lane = el("article", { class: "lane", "data-testid": `spec-${spec.id}` });
@@ -143,7 +188,7 @@ function renderDetail(state) {
       const row = el("p", {
         class: gate.pass ? "pass" : "fail",
         "data-testid": `gate-${spec.id}-${gate.gate}`,
-        text: gate.pass ? `${gate.gate} pass` : `${gate.gate} fail: ${gate.findings.map((item) => item.detail).join(" ")}`,
+        text: gateLine(gate, spec),
       });
       lane.append(row);
     }
@@ -166,6 +211,27 @@ function renderDetail(state) {
     lanes.append(lane);
   }
   detail.append(lanes);
+  renderGates(specs);
+}
+
+function renderGates(specs) {
+  const root = document.querySelector("#gates-panel");
+  if (!root) return;
+  root.replaceChildren();
+  root.append(el("h2", { text: "Gates" }));
+  if (!specs || specs.length === 0) {
+    root.append(el("p", { text: "No spec is gated yet." }));
+    return;
+  }
+  for (const spec of specs) {
+    if (!spec.gates || spec.gates.length === 0) {
+      root.append(el("p", { text: `${spec.id} has not been gated.` }));
+      continue;
+    }
+    for (const gate of spec.gates) {
+      root.append(el("p", { "data-testid": `panel-${spec.id}-${gate.gate}`, text: `${spec.id} ${gateLine(gate, spec)}` }));
+    }
+  }
 }
 
 function renderLessons(state) {
@@ -187,14 +253,26 @@ function renderHealth(health) {
   if (!pipe) return;
   const states = el("p", { "data-testid": "health-states" });
   for (const phase of PHASES) states.append(el("span", { class: "chip", text: `${phase} ${pipe.ideasByState[phase] || 0}` }));
-  const rates = ["G1", "G2", "G3"]
+  states.append(el("span", { class: "chip", "data-testid": "health-in-progress", text: `in progress ${pipe.ideasInProgress || 0}` }));
+  const quarantined = health && health.quarantined;
+  const torn = quarantined ? (quarantined.events || 0) + (quarantined.ideas || 0) + (quarantined.lessons || 0) + (quarantined.intake || 0) : 0;
+  if (torn > 0 && quarantined) {
+    const files = Array.isArray(health.quarantineFiles) ? health.quarantineFiles.filter((file) => file.lines > 0) : [];
+    const counts = `events ${quarantined.events || 0} · ideas ${quarantined.ideas || 0} · lessons ${quarantined.lessons || 0} · intake ${quarantined.intake || 0}`;
+    const paths = files.map((file) => file.path).join(", ");
+    states.append(el("span", { class: "chip warn", "data-testid": "health-quarantine", text: paths ? `quarantine ${counts} · ${paths}` : `quarantine ${counts}` }));
+    if (health.warning) states.append(el("span", { class: "chip warn", "data-testid": "health-quarantine-warning", text: health.warning }));
+  }
+  const rates = ["G0", "G1", "G2", "G3"]
     .map((id) => {
       const row = pipe.gatePassRates[id];
       const label = !row || row.rate === null ? "n/a" : `${Math.round(row.rate * 100)}%`;
       return `${id} ${label}`;
     })
     .join(" · ");
-  const mean = pipe.meanMinutesIdeaToVerified === null ? "n/a" : `${pipe.meanMinutesIdeaToVerified} min`;
+  const meanValue = pipe.meanMinutesIdeaToVerified ?? pipe.meanMinutesSpecToVerified;
+  const mean = meanValue === null || meanValue === undefined ? "n/a" : `${meanValue} min`;
+  const specResults = `verified ${pipe.specsVerified || 0} · rejected ${pipe.specsRejected || 0}`;
   const card = (title, node) => {
     const article = el("article");
     article.append(el("h3", { text: title }));
@@ -204,7 +282,8 @@ function renderHealth(health) {
   root.append(
     card("Ideas by state", states),
     card("Gate pass rates", el("p", { text: rates, "data-testid": "health-gates" })),
-    card("Mean time idea to verified", el("p", { text: mean, "data-testid": "health-mean" })),
+    card("Mean time to verified", el("p", { text: mean, "data-testid": "health-mean" })),
+    card("Spec results", el("p", { text: specResults, "data-testid": "health-spec-results" })),
     card("Lessons promoted", el("p", { text: String(pipe.lessonsPromoted), "data-testid": "health-lessons" })),
   );
 }
@@ -213,7 +292,7 @@ function renderChart(source, counts) {
   chartSrc.textContent = source;
   const edges = [];
   for (const line of source.split("\n")) {
-    const match = line.match(/^\s*([a-z]+) --> ([a-z]+): ([a-z_]+)\s*$/);
+    const match = line.match(/^\s*([a-z]+) --> ([a-z]+): (.+)\s*$/);
     if (match) edges.push({ from: match[1], to: match[2], event: match[3] });
   }
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");

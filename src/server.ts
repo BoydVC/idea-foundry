@@ -14,10 +14,11 @@ import {
   type CommandResult,
 } from "./commands.js";
 import { DomainError, prUrl } from "./domain.js";
-import { pipelineHealth } from "./health.js";
-import { FixturePlanner } from "./planner.js";
+import { pipelineHealth, presentState } from "./health.js";
+import { foundryPort } from "./port.js";
+import { selectPlanner } from "./planners/llm.js";
 import { renderReport } from "./packet.js";
-import { Store } from "./store.js";
+import { Store, quarantineWarning } from "./store.js";
 import { mermaid, edgesFromTla } from "./statechart.js";
 
 const BLOCKED = new Set(["merge", "deploy", "send", "ship", "email", "slack", "publish"]);
@@ -72,7 +73,7 @@ export type Running = { server: Server; port: number; url: string };
 
 export async function startServer(options: { store: Store; port: number; seed?: boolean; host?: string }): Promise<Running> {
   const store = options.store;
-  const planner = new FixturePlanner();
+  const planner = selectPlanner(process.env, (path) => store.readText(path));
   const host = options.host ?? "127.0.0.1";
   if (options.seed && store.load().ideas.length === 0) seedDemo(store, planner);
 
@@ -88,17 +89,23 @@ export async function startServer(options: { store: Store; port: number; seed?: 
         const address = server.address();
         const port = address && typeof address === "object" ? address.port : options.port;
         const snap = store.load();
+        const quarantineFiles = store.quarantineFiles();
+        const quarantined = store.quarantineCounts();
+        const warning = quarantineWarning(quarantined, quarantineFiles);
         send(res, 200, {
           ok: true,
           service: "idea-foundry",
           port,
           ideas: snap.ideas.length,
           pipeline: pipelineHealth(snap),
+          quarantined,
+          quarantineFiles,
+          ...(warning ? { warning } : {}),
         });
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/state") {
-        send(res, 200, { ok: true, ...store.load() });
+        send(res, 200, { ok: true, ...presentState(store.load()) });
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/statechart") {
@@ -120,10 +127,31 @@ export async function startServer(options: { store: Store; port: number; seed?: 
       }
       if (req.method === "POST" && url.pathname === "/api/idea") {
         const body = await readBody(req);
-        send(res, 200, createIdea(store, String(body.title ?? ""), false));
+        const unknown = Object.keys(body).filter((key) => key !== "title" && key !== "allowDuplicate");
+        if (unknown.length > 0) {
+          send(res, 400, {
+            ok: false,
+            status: 400,
+            error: "bad_request",
+            message: "The request has an unknown field.",
+            next: "Send a JSON object with a title.",
+          });
+          return;
+        }
+        if (typeof body.title !== "string") {
+          send(res, 400, {
+            ok: false,
+            status: 400,
+            error: "bad_title",
+            message: "The title must be a string.",
+            next: "Send {\"title\":\"habit tracker export\"}.",
+          });
+          return;
+        }
+        send(res, 200, createIdea(store, body.title, false, { allowDuplicate: body.allowDuplicate === true }));
         return;
       }
-      const ideaAction = url.pathname.match(/^\/api\/idea\/(i-\d{4})\/(restate|approve|decompose|gate|park)$/);
+      const ideaAction = url.pathname.match(/^\/api\/idea\/(i-\d{4,})\/(restate|approve|decompose|gate|park)$/);
       if (req.method === "POST" && ideaAction) {
         const id = ideaAction[1] ?? "";
         const action = ideaAction[2];
@@ -138,7 +166,7 @@ export async function startServer(options: { store: Store; port: number; seed?: 
         }
         return send(res, 200, park(store, id, false, version));
       }
-      const specAction = url.pathname.match(/^\/api\/spec\/(s-\d{4}-[1-6])\/(dispatch|ingest)$/);
+      const specAction = url.pathname.match(/^\/api\/spec\/(s-\d{4,}-[1-6])\/(dispatch|ingest)$/);
       if (req.method === "POST" && specAction) {
         const id = specAction[1] ?? "";
         const action = specAction[2];
@@ -178,7 +206,7 @@ export async function startServer(options: { store: Store; port: number; seed?: 
       }
       send(res, 404, { ok: false, status: 404, error: "not_found", message: "No such route.", next: "Use /api/state, /api/statechart, or /api/idea." });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Request failed.";
+      const message = error instanceof SyntaxError ? "The request body is not valid JSON." : error instanceof Error ? error.message : "Request failed.";
       send(res, 400, { ok: false, status: 400, error: "bad_request", message, next: "Send a JSON object and retry." });
     }
   });
@@ -198,7 +226,7 @@ if (calledDirectly) {
   if (process.env.FOUNDRY_FRESH === "1") store.reset();
   const running = await startServer({
     store,
-    port: Number(process.env.PORT ?? 4440),
+    port: foundryPort(),
     seed: process.env.FOUNDRY_SEED === "1",
   });
   process.stdout.write(`${JSON.stringify({ ok: true, data: { url: running.url } })}\n`);

@@ -1,6 +1,9 @@
 import { pathToFileURL } from "node:url";
-import { createIdea, approve, decompose, dispatch, gate, importNotes, ingest, park, probePeerReview, restate, seedDemo } from "./commands.js";
-import { SEED_TITLES, FixturePlanner } from "./planner.js";
+import { createIdea, approve, clearQuarantine, correct, decompose, dispatch, gate, importBookmarks, importNotes, ingest, listQuarantine, park, probePeerReview, recheck, restate, seedDemo, weekly } from "./commands.js";
+import { DomainError } from "./domain.js";
+import { foundryPort } from "./port.js";
+import { selectPlanner } from "./planners/llm.js";
+import { SEED_TITLES } from "./planner.js";
 import { Store } from "./store.js";
 
 type Flags = {
@@ -9,26 +12,50 @@ type Flags = {
   note?: string;
   report?: string;
   pr?: string;
+  from?: string;
+  since?: string;
   draft?: boolean;
+  allowDuplicate: boolean;
+  fresh: boolean;
+  recheck: boolean;
+  unverify: boolean;
+  list: boolean;
+  clear: boolean;
   version?: number;
   help: boolean;
 };
 
 function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
-  const flags: Flags = { dryRun: false, data: process.env.FOUNDRY_DATA ?? "data", help: false };
+  const flags: Flags = {
+    dryRun: false,
+    data: process.env.FOUNDRY_DATA ?? "data",
+    help: false,
+    allowDuplicate: false,
+    fresh: false,
+    recheck: false,
+    unverify: false,
+    list: false,
+    clear: false,
+  };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--dry-run") flags.dryRun = true;
     else if (arg === "--help" || arg === "-h") flags.help = true;
     else if (arg === "--draft") flags.draft = true;
+    else if (arg === "--allow-duplicate") flags.allowDuplicate = true;
+    else if (arg === "--fresh") flags.fresh = true;
+    else if (arg === "--recheck") flags.recheck = true;
+    else if (arg === "--unverify") flags.unverify = true;
+    else if (arg === "--list") flags.list = true;
+    else if (arg === "--clear") flags.clear = true;
     else if (arg === "--no-draft") flags.draft = false;
     else if (arg === "--version" || arg === "--record-version") {
       const value = argv[i + 1];
       if (!value || !/^\d+$/.test(value)) throw new Error(`${arg} needs a non-negative integer.`);
       i += 1;
       flags.version = Number(value);
-    } else if (arg === "--data" || arg === "--note" || arg === "--report" || arg === "--pr") {
+    } else if (arg === "--data" || arg === "--note" || arg === "--report" || arg === "--pr" || arg === "--from" || arg === "--since") {
       const value = argv[i + 1];
       if (!value) throw new Error(`Missing value for ${arg}.`);
       i += 1;
@@ -36,6 +63,8 @@ function parseArgs(argv: string[]): { flags: Flags; rest: string[] } {
       if (arg === "--note") flags.note = value;
       if (arg === "--report") flags.report = value;
       if (arg === "--pr") flags.pr = value;
+      if (arg === "--from") flags.from = value;
+      if (arg === "--since") flags.since = value;
     } else if (arg !== undefined) rest.push(arg);
   }
   return { flags, rest };
@@ -47,6 +76,8 @@ const HELP = {
   data: {
     usage: [
       "foundry idea \"habit tracker export\"",
+      "foundry idea \"habit tracker export\" --allow-duplicate",
+      "foundry seed --fresh",
       "foundry restate i-0001",
       "foundry approve i-0001 --note \"Ship the smallest slice\"",
       "foundry decompose i-0001",
@@ -55,6 +86,11 @@ const HELP = {
       "foundry ingest s-0001-1 --report report.md --pr https://github.com/example-org/demo-board/pull/1",
       "foundry park i-0001",
       "foundry import fixtures/bookmarks.json",
+      "foundry import --from fixtures/x-bookmarks.json",
+      "foundry correct",
+      "foundry weekly --since 2026-10-24",
+      "foundry quarantine --list",
+      "foundry quarantine --clear",
       "foundry seed",
       "foundry dashboard",
     ],
@@ -79,10 +115,17 @@ export async function main(argv: string[]): Promise<number> {
   }
   const [command, ...pos] = rest;
   const store = new Store(flags.data);
-  const planner = new FixturePlanner();
+  let planner;
+  try {
+    planner = selectPlanner(process.env, (path) => store.readText(path));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Bad planner.";
+    process.stdout.write(`${JSON.stringify({ ok: false, status: 400, error: "bad_planner", message, next: "Set FOUNDRY_PLANNER to fixture or agent." })}\n`);
+    return 1;
+  }
   if (command === "dashboard") {
     const { startServer } = await import("./server.js");
-    const port = Number(process.env.PORT ?? 4440);
+    const port = foundryPort();
     if (process.env.FOUNDRY_FRESH === "1") store.reset();
     const started = await startServer({ store, port, seed: process.env.FOUNDRY_SEED === "1" });
     process.stdout.write(`${JSON.stringify({ ok: true, dryRun: false, data: { url: started.url } })}\n`);
@@ -93,7 +136,7 @@ export async function main(argv: string[]): Promise<number> {
   try {
     switch (command) {
       case "idea":
-        result = createIdea(store, pos.join(" "), flags.dryRun);
+        result = createIdea(store, pos.join(" "), flags.dryRun, { allowDuplicate: flags.allowDuplicate });
         break;
       case "restate":
         result = restate(store, pos[0] ?? "", planner, flags.dryRun, flags.version);
@@ -113,19 +156,33 @@ export async function main(argv: string[]): Promise<number> {
         result = dispatch(store, pos[0] ?? "", flags.dryRun, flags.version);
         break;
       case "ingest": {
+        if (!flags.report && flags.recheck) {
+          result = recheck(store, pos[0] ?? "", { pr: flags.pr, expectedVersion: flags.version, unverify: flags.unverify }, flags.dryRun);
+          break;
+        }
         if (!flags.report) {
-          result = { ok: false, status: 400, error: "missing_report", message: "Ingest needs a report file.", next: "Pass --report final.md." };
+          result = { ok: false, status: 400, error: "missing_report", message: "Ingest needs a report file.", next: "Pass --report final.md, or retry with --recheck after a stored attempt." };
           break;
         }
         const text = store.readText(flags.report);
-        result = ingest(store, pos[0] ?? "", text, { draft: flags.draft, pr: flags.pr, expectedVersion: flags.version }, flags.dryRun);
+        result = ingest(
+          store,
+          pos[0] ?? "",
+          text,
+          { draft: flags.draft, pr: flags.pr, expectedVersion: flags.version, unverify: flags.unverify },
+          flags.dryRun,
+        );
         break;
       }
       case "park":
         result = park(store, pos[0] ?? "", flags.dryRun, flags.version);
         break;
       case "import": {
-        const file = pos[0];
+        const file = flags.from ?? pos[0];
+        if (flags.from) {
+          result = importBookmarks(store, store.readImport(flags.from), planner, flags.dryRun);
+          break;
+        }
         if (!file) {
           result = {
             ok: false,
@@ -136,22 +193,45 @@ export async function main(argv: string[]): Promise<number> {
           };
           break;
         }
-        result = importNotes(store, store.readText(file), planner, flags.dryRun);
+        result = importNotes(store, store.readImport(file), planner, flags.dryRun);
         break;
       }
+      case "correct":
+        result = correct(store);
+        break;
+      case "weekly":
+        if (!flags.since) {
+          result = {
+            ok: false,
+            status: 400,
+            error: "bad_since",
+            message: "weekly needs a YYYY-MM-DD date.",
+            next: "Run `foundry weekly --since 2026-10-24`.",
+          };
+          break;
+        }
+        result = weekly(store, flags.since);
+        break;
+      case "quarantine":
+        result = flags.clear ? clearQuarantine(store) : listQuarantine(store);
+        break;
       case "seed":
-        if (flags.dryRun) {
+        if (flags.dryRun && (flags.fresh || store.load().ideas.length === 0)) {
           result = { ok: true, dryRun: true, data: { titles: SEED_TITLES } };
           break;
         }
-        result = seedDemo(store, planner);
+        result = seedDemo(store, planner, { fresh: flags.fresh });
         break;
       default:
         result = { ok: false, status: 400, error: "unknown_command", message: `Unknown command ${command}.`, next: "Run `foundry --help`." };
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Command failed.";
-    result = { ok: false, status: 500, error: "internal", message, next: "Retry the command." };
+    if (error instanceof DomainError) {
+      result = { ok: false, status: 400, error: error.code, message: error.message, next: error.next };
+    } else {
+      const message = error instanceof Error ? error.message : "Command failed.";
+      result = { ok: false, status: 500, error: "internal", message, next: "Retry the command." };
+    }
   }
   process.stdout.write(`${JSON.stringify(result)}\n`);
   return result.ok ? 0 : 1;

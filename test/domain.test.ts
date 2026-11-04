@@ -25,6 +25,7 @@ describe("transition", () => {
       "gated dispatch dispatched",
       "gated gate_fail specced",
       "gated park parked",
+      "gated reject rejected",
       "raw park parked",
       "raw restate restated",
       "restated approve approved",
@@ -63,9 +64,16 @@ describe("transition", () => {
         body: "Done when: the command exits 0.",
         acceptance: ["node --test src/habit-tracker-export/records.test.ts"],
         touch: ["src/habit-tracker-export/records.ts"],
+        sketch: {
+          types: "export type HabitTrackerExportRecord = { id: string; label: string };",
+          signatures: [
+            'export function parseHabitTrackerExportRecord(input: unknown): HabitTrackerExportRecord {\n  if (input === undefined) throw new Error("not implemented");\n  throw new Error("not implemented");\n}',
+          ],
+        },
         maxLines: 80,
         landsAfter: null,
         gates: [
+          { gate: "G0", pass: true, findings: [] },
           { gate: "G1", pass: true, findings: [] },
           { gate: "G2", pass: true, findings: [] },
           { gate: "G3", pass: true, findings: [] },

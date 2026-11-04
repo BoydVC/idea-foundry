@@ -29,7 +29,7 @@ export const EVENTS = [
 
 export type EventName = (typeof EVENTS)[number];
 
-export const GATES = ["G1", "G2", "G3"] as const;
+export const GATES = ["G0", "G1", "G2", "G3"] as const;
 export type GateId = (typeof GATES)[number];
 
 export const LAYERS = ["G0", "G1", "G2", "G3"] as const;
@@ -242,12 +242,12 @@ export function transition(state: Phase, event: EventName): Phase {
     case "reject":
       switch (state) {
         case "dispatched":
+        case "gated":
           return "rejected";
         case "raw":
         case "restated":
         case "approved":
         case "specced":
-        case "gated":
         case "verified":
         case "rejected":
         case "parked":
@@ -309,10 +309,21 @@ export function edgesOfTransition(): Edge[] {
 }
 
 export function pad4(n: number): string {
-  if (!Number.isInteger(n) || n < 1 || n > 9999) {
-    throw new DomainError("bad_counter", `Counter ${n} is outside 1..9999.`, "Start a new data directory.");
+  if (!Number.isInteger(n) || n < 1 || n > Number.MAX_SAFE_INTEGER) {
+    throw new DomainError(
+      "bad_counter",
+      `Counter ${n} is not a positive safe integer.`,
+      "Use a data directory whose next id is a positive integer. Ids look like i-0001 and i-10000.",
+    );
   }
   return String(n).padStart(4, "0");
+}
+
+export function compareRecordIds(a: string, b: string): number {
+  const left = Number(/^[a-z]-(\d+)/.exec(a)?.[1] ?? "0");
+  const right = Number(/^[a-z]-(\d+)/.exec(b)?.[1] ?? "0");
+  if (left !== right) return left - right;
+  return a.localeCompare(b);
 }
 
 export function ideaIdFromCounter(n: number): IdeaId {
@@ -339,28 +350,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function ideaId(raw: string): IdeaId {
-  if (!/^i-\d{4}$/.test(raw)) {
+  if (!/^i-\d{4,}$/.test(raw)) {
     throw new DomainError("bad_idea_id", `Bad idea id ${JSON.stringify(raw)}.`, "Use an id like i-0001.");
   }
   return raw as IdeaId;
 }
 
 export function specId(raw: string): SpecId {
-  if (!/^s-\d{4}-[1-6]$/.test(raw)) {
+  if (!/^s-\d{4,}-[1-6]$/.test(raw)) {
     throw new DomainError("bad_spec_id", `Bad spec id ${JSON.stringify(raw)}.`, "Use an id like s-0001-1.");
   }
   return raw as SpecId;
 }
 
 export function stackId(raw: string): StackId {
-  if (!/^k-\d{4}$/.test(raw)) {
+  if (!/^k-\d{4,}$/.test(raw)) {
     throw new DomainError("bad_stack_id", `Bad stack id ${JSON.stringify(raw)}.`, "Use an id like k-0001.");
   }
   return raw as StackId;
 }
 
 export function lessonId(raw: string): LessonId {
-  if (!/^l-\d{4}$/.test(raw)) {
+  if (!/^l-\d{4,}$/.test(raw)) {
     throw new DomainError("bad_lesson_id", `Bad lesson id ${JSON.stringify(raw)}.`, "Use an id like l-0001.");
   }
   return raw as LessonId;
@@ -388,22 +399,147 @@ export function prUrl(raw: string): PrUrl {
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 
+const TITLE_CONTROLS = /[\u0000-\u001F\u007F-\u009F\u200B\u202A-\u202E\u2066-\u2069\uFEFF]/;
+
+const BLACK_FLAG = 0x1f3f4;
+const TAG_MIN = 0xe0020;
+const TAG_MAX = 0xe007f;
+const TAG_A = 0xe0061;
+const TAG_Z = 0xe007a;
+const TAG_CANCEL = 0xe007f;
+
+const INDIC_SCRIPT =
+  /^(?:\p{Script=Devanagari}|\p{Script=Bengali}|\p{Script=Gurmukhi}|\p{Script=Gujarati}|\p{Script=Oriya}|\p{Script=Tamil}|\p{Script=Telugu}|\p{Script=Kannada}|\p{Script=Malayalam})$/u;
+
+const ZWNJ_LETTER =
+  /^(?:\p{Script=Arabic}|\p{Script=Devanagari}|\p{Script=Bengali}|\p{Script=Gurmukhi}|\p{Script=Gujarati}|\p{Script=Oriya}|\p{Script=Tamil}|\p{Script=Telugu}|\p{Script=Kannada}|\p{Script=Malayalam})$/u;
+
+function isEmojiModifier(char: string | undefined): boolean {
+  return char !== undefined && /^\p{Emoji_Modifier}$/u.test(char);
+}
+
+function isZwnjLetter(char: string | undefined): boolean {
+  return char !== undefined && /^\p{L}$/u.test(char) && ZWNJ_LETTER.test(char);
+}
+
+function isIndicLetter(char: string | undefined): boolean {
+  return char !== undefined && /^\p{L}$/u.test(char) && INDIC_SCRIPT.test(char);
+}
+
+function isIndicMark(char: string | undefined): boolean {
+  return char !== undefined && /^\p{Mn}$/u.test(char) && INDIC_SCRIPT.test(char);
+}
+
+function codePoint(chars: string[], index: number): number {
+  return chars[index]?.codePointAt(0) ?? 0;
+}
+
+function flagTagEnd(chars: string[], start: number): number {
+  let cursor = start + 1;
+  let letters = 0;
+  while (cursor < chars.length) {
+    const point = codePoint(chars, cursor);
+    if (point >= TAG_A && point <= TAG_Z) {
+      letters += 1;
+      cursor += 1;
+      continue;
+    }
+    if (point === TAG_CANCEL && letters >= 2) return cursor + 1;
+    return start;
+  }
+  return start;
+}
+
+function strayTagCharacters(title: string): boolean {
+  const chars = Array.from(title);
+  let index = 0;
+  while (index < chars.length) {
+    const point = codePoint(chars, index);
+    if (point === BLACK_FLAG) {
+      const end = flagTagEnd(chars, index);
+      if (end > index) {
+        index = end;
+        continue;
+      }
+    }
+    if (point >= TAG_MIN && point <= TAG_MAX) return true;
+    index += 1;
+  }
+  return false;
+}
+
+function zwnjAfterVirama(chars: string[], index: number): boolean {
+  if (!isIndicLetter(chars[index + 1]) || !isIndicMark(chars[index - 1])) return false;
+  let cursor = index - 2;
+  while (isIndicMark(chars[cursor])) cursor -= 1;
+  return isIndicLetter(chars[cursor]);
+}
+
+function pictographBeside(chars: string[], index: number, direction: -1 | 1): boolean {
+  let cursor = index + direction;
+  while (chars[cursor] === "\uFE0F" || (direction < 0 && isEmojiModifier(chars[cursor]))) cursor += direction;
+  const neighbor = chars[cursor];
+  return neighbor !== undefined && /^\p{Extended_Pictographic}$/u.test(neighbor);
+}
+
+function zwnjBreaksScript(title: string): boolean {
+  const chars = Array.from(title);
+  for (let index = 0; index < chars.length; index += 1) {
+    if (chars[index] !== "\u200C") continue;
+    if (isZwnjLetter(chars[index - 1]) && isZwnjLetter(chars[index + 1])) continue;
+    if (zwnjAfterVirama(chars, index)) continue;
+    return true;
+  }
+  return false;
+}
+
+function zwjBreaksEmoji(title: string): boolean {
+  const chars = Array.from(title);
+  for (let index = 0; index < chars.length; index += 1) {
+    if (chars[index] !== "\u200D") continue;
+    if (!pictographBeside(chars, index, -1) || !pictographBeside(chars, index, 1)) return true;
+  }
+  return false;
+}
+
+export function normalizeTitle(raw: string): string {
+  return raw
+    .normalize("NFC")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function parseTitle(raw: unknown): string {
-  if (typeof raw !== "string" || raw.trim().length === 0 || raw.length > 200 || /[\r\n]/.test(raw)) {
+  if (typeof raw !== "string") {
+    throw new DomainError("bad_title", "The title must be a string.", "Try `foundry idea \"habit tracker export\"`.");
+  }
+  const normalized = raw.normalize("NFC");
+  if (TITLE_CONTROLS.test(normalized) || zwjBreaksEmoji(normalized) || zwnjBreaksScript(normalized) || strayTagCharacters(normalized)) {
     throw new DomainError(
       "bad_title",
-      "The title must be one non-empty line of at most 200 characters.",
+      "The title contains a control character, a bidi override, a tag character, or a zero-width character.",
+      "Use a plain product name such as \"habit tracker export\".",
+    );
+  }
+  const title = normalized.trim();
+  if (title.length < 2 || normalized.length > 200) {
+    throw new DomainError(
+      "bad_title",
+      "The title must be one line of 2 to 200 characters.",
       "Try `foundry idea \"habit tracker export\"`.",
     );
   }
-  if (EMAIL.test(raw) || /\d{7,}/.test(raw)) {
+  if (EMAIL.test(title) || /\d{7,}/.test(title)) {
     throw new DomainError(
       "pii_title",
       "The title looks like contact data.",
       "Use a generic product name such as \"weather widget\".",
     );
   }
-  return raw.trim();
+  return title;
 }
 
 export function parsePhase(raw: unknown): Phase {
@@ -442,7 +578,11 @@ function parseLabels(raw: unknown): readonly string[] {
   return raw as string[];
 }
 
-export type Finding = { key: string; detail: string };
+export type ProofLevel = 1 | 2 | 3 | 4 | 5;
+
+export type Finding = { key: string; detail: string; proof: ProofLevel };
+
+export type Sketch = { types: string; signatures: readonly string[] };
 
 export type GateResult = {
   gate: GateId;
@@ -504,6 +644,7 @@ export type SpecBase = {
   body: string;
   acceptance: readonly string[];
   touch: readonly string[];
+  sketch: Sketch;
   maxLines: number;
   landsAfter: SpecId | null;
   gates: readonly GateResult[];
@@ -545,13 +686,14 @@ export type Snapshot = {
   stacks: Stack[];
   lessons: Lesson[];
   findingCounts: Record<string, number>;
+  seenBookmarkIds: readonly string[];
 };
 
 function parseGate(raw: unknown): GateResult {
   if (!isRecord(raw)) throw new DomainError("bad_gate", "A gate result must be an object.", "Re-run `foundry gate <id>`.");
   const gate = raw.gate;
-  if (gate !== "G1" && gate !== "G2" && gate !== "G3") {
-    throw new DomainError("bad_gate", "Gate id must be G1, G2, or G3.", "Re-run `foundry gate <id>`.");
+  if (gate !== "G0" && gate !== "G1" && gate !== "G2" && gate !== "G3") {
+    throw new DomainError("bad_gate", "Gate id must be G0, G1, G2, or G3.", "Re-run `foundry gate <id>`.");
   }
   if (typeof raw.pass !== "boolean" || !Array.isArray(raw.findings)) {
     throw new DomainError("bad_gate", "A gate result needs pass and findings.", "Re-run `foundry gate <id>`.");
@@ -561,7 +703,11 @@ function parseGate(raw: unknown): GateResult {
     if (!isRecord(item) || typeof item.key !== "string" || typeof item.detail !== "string") {
       throw new DomainError("bad_gate", "Each finding needs a key and a detail.", "Re-run `foundry gate <id>`.");
     }
-    findings.push({ key: item.key, detail: item.detail });
+    const proof = item.proof;
+    if (proof !== 1 && proof !== 2 && proof !== 3 && proof !== 4 && proof !== 5) {
+      throw new DomainError("bad_gate", "Each finding needs a proof level from 1 to 5.", "Re-run `foundry gate <id>`.");
+    }
+    findings.push({ key: item.key, detail: item.detail, proof });
   }
   const pass = findings.length === 0;
   if (raw.pass !== pass) {
@@ -581,12 +727,12 @@ function readyForLaterPhase(spec: SpecBase): void {
       "Add both, then run `foundry gate <id>`.",
     );
   }
-  if (spec.gates.length !== 3 || spec.gates.some((gate) => !gate.pass)) {
-    throw new DomainError("gates_red", "G1, G2, and G3 must all pass.", "Fix the findings, then run `foundry gate <id>`.");
+  if (spec.gates.length !== 4 || spec.gates.some((gate) => !gate.pass)) {
+    throw new DomainError("gates_red", "G0, G1, G2, and G3 must all pass.", "Fix the findings, then run `foundry gate <id>`.");
   }
   const ids = spec.gates.map((gate) => gate.gate);
-  if (ids[0] !== "G1" || ids[1] !== "G2" || ids[2] !== "G3") {
-    throw new DomainError("gates_red", "Gate results must be G1 then G2 then G3.", "Re-run `foundry gate <id>`.");
+  if (ids[0] !== "G0" || ids[1] !== "G1" || ids[2] !== "G2" || ids[3] !== "G3") {
+    throw new DomainError("gates_red", "Gate results must be G0 then G1 then G2 then G3.", "Re-run `foundry gate <id>`.");
   }
 }
 
@@ -607,6 +753,7 @@ function parseSpecBase(source: Record<string, unknown>): SpecBase {
   if (!Array.isArray(touch) || touch.some((item) => typeof item !== "string")) {
     throw new DomainError("bad_touch", "The touch map must be a list of paths.", "List the files this spec may change.");
   }
+  const sketch = parseSketch(source.sketch);
   const landsRaw = source.landsAfter;
   const landsAfter = landsRaw === null || landsRaw === undefined ? null : specId(String(landsRaw));
   if (index === 1 && landsAfter !== null) {
@@ -629,6 +776,7 @@ function parseSpecBase(source: Record<string, unknown>): SpecBase {
     body: reqString(source, "body"),
     acceptance: acceptance as string[],
     touch: touch as string[],
+    sketch,
     maxLines,
     landsAfter,
     gates: gatesRaw.map(parseGate),
@@ -681,6 +829,19 @@ export function parseSpec(input: unknown): Spec {
     default:
       return assertNever(state);
   }
+}
+
+function parseSketch(raw: unknown): Sketch {
+  if (!isRecord(raw)) {
+    throw new DomainError("bad_sketch", "A spec needs a sketch with types and signatures.", "Decompose the idea again.");
+  }
+  if (typeof raw.types !== "string" || raw.types.trim() === "") {
+    throw new DomainError("bad_sketch", "The sketch needs a types block.", "Add types to the architect sketch.");
+  }
+  if (!Array.isArray(raw.signatures) || raw.signatures.length === 0 || raw.signatures.some((item) => typeof item !== "string" || item.trim() === "")) {
+    throw new DomainError("bad_sketch", "The sketch needs at least one signature.", "Add function signatures to the architect sketch.");
+  }
+  return { types: raw.types, signatures: raw.signatures as string[] };
 }
 
 function ideaStory(source: Record<string, unknown>): {
@@ -799,6 +960,7 @@ export function emptySnapshot(): Snapshot {
     stacks: [],
     lessons: [],
     findingCounts: {},
+    seenBookmarkIds: [],
   };
 }
 
@@ -820,6 +982,10 @@ export function parseSnapshot(input: unknown): Snapshot {
   const specs = Array.isArray(input.specs) ? input.specs.map(parseSpec) : [];
   const stacks = Array.isArray(input.stacks) ? input.stacks.map(parseStack) : [];
   const lessons = Array.isArray(input.lessons) ? input.lessons.map(parseLesson) : [];
+  const seenRaw = input.seenBookmarkIds === undefined ? [] : input.seenBookmarkIds;
+  if (!Array.isArray(seenRaw) || seenRaw.some((item) => typeof item !== "string" || item.trim() === "")) {
+    throw new DomainError("bad_state", "seenBookmarkIds must be a list of ids.", "Delete the data directory and start again.");
+  }
   return {
     version: version(Number(input.version ?? 0)),
     nextIdea: typeof input.nextIdea === "number" ? input.nextIdea : ideas.length + 1,
@@ -829,6 +995,7 @@ export function parseSnapshot(input: unknown): Snapshot {
     stacks,
     lessons,
     findingCounts: counts,
+    seenBookmarkIds: seenRaw as string[],
   };
 }
 

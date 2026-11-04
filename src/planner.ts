@@ -9,8 +9,34 @@ export type SpecDraft = {
   body: string;
   acceptance: readonly string[];
   touch: readonly string[];
+  sketch: { types: string; signatures: string[] };
   maxLines: number;
 };
+
+export function typeName(title: string, slice: string): string {
+  const parts = `${title} ${slice}`
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter((word) => word.length > 0)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+  return parts.join("") || "Slice";
+}
+
+export function sketchFor(title: string, slice: string): { types: string; signatures: string[] } {
+  const name = typeName(title, slice);
+  return {
+    types: `export type ${name} = { id: string; label: string };`,
+    signatures: [
+      [
+        `export function parse${name}(input: unknown): ${name} {`,
+        `  if (input === undefined) throw new Error("not implemented");`,
+        `  throw new Error("not implemented");`,
+        `}`,
+      ].join("\n"),
+    ],
+  };
+}
 
 export interface Planner {
   restate(title: string): Restatement;
@@ -76,6 +102,7 @@ export class FixturePlanner implements Planner {
         maxLines,
         acceptance: [`node --test ${test}`],
         touch: [file, test],
+        sketch: sketchFor(title, name),
         body: [
           `# ${title} / ${name}`,
           "",

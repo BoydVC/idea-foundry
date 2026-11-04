@@ -1,4 +1,22 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+
+async function waitForHealth(url: string): Promise<void> {
+  const started = Date.now();
+  for (;;) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch {
+      /* still booting */
+    }
+    if (Date.now() - started > 20_000) throw new Error(`No health at ${url}`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
 
 test("phone width keeps the board on the page", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -38,6 +56,8 @@ test("add an idea and verify the bottom of its stack", async ({ page }) => {
   await expect(page.getByTestId("gate-s-0006-1-G1")).toContainText("G1 pass");
   await expect(page.getByTestId("gate-s-0006-1-G2")).toContainText("G2 pass");
   await expect(page.getByTestId("gate-s-0006-1-G3")).toContainText("G3 pass");
+  await expect(page.getByTestId("gates-panel")).toContainText("architecture");
+  await expect(page.getByTestId("gates-panel")).toContainText("proof 4");
 
   for (let index = 1; index <= count; index += 1) {
     const id = `s-0006-${index}`;
@@ -45,10 +65,15 @@ test("add an idea and verify the bottom of its stack", async ({ page }) => {
     await page.getByTestId(`ingest-${id}`).click();
     await expect(page.getByTestId(`spec-${id}`)).toContainText("verified");
     if (index === 1) {
+      await expect(page.getByTestId("health-spec-results")).toContainText("verified 1");
+      await expect(page.getByTestId("idea-outcome-i-0006")).toContainText("in progress");
+      await expect(page.getByTestId("health-in-progress")).toContainText("in progress 1");
+      await expect(page.getByTestId("idea-outcome-i-0006")).toContainText("1 verified");
       await expect(page.getByTestId("banner")).toContainText("report line");
     }
   }
   await expect(page.getByTestId("detail").locator(".mono").first()).toContainText("i-0006 · verified");
+  await expect(page.locator(".column").filter({ has: page.getByRole("heading", { name: /^verified\b/ }) }).getByTestId("idea-i-0006")).toBeVisible();
 
   const merge = await page.request.post("/api/merge");
   expect(merge.status()).toBe(403);
@@ -105,4 +130,73 @@ test("idea titles render as text", async ({ page }) => {
   expect(dialogs).toBe(0);
   const html = await page.locator("[data-testid='detail'] h2").evaluate((node) => node.innerHTML);
   expect(html).toContain("&lt;img");
+});
+
+test("two dashboards on 4440 and 4441 keep separate data", async ({ request }) => {
+  let child: ChildProcess | undefined;
+  const side = spawn(process.execPath, ["node_modules/tsx/dist/cli.mjs", "src/server.ts"], {
+    env: {
+      ...process.env,
+      FOUNDRY_DATA: "data/e2e-side",
+      FOUNDRY_FRESH: "1",
+      FOUNDRY_SEED: "1",
+      FOUNDRY_PORT: "4441",
+      PORT: "4441",
+      FOUNDRY_OPEN_DRAFTS: "0",
+    },
+  });
+  child = side;
+  try {
+    await waitForHealth("http://127.0.0.1:4441/api/health");
+    const added = await fetch("http://127.0.0.1:4441/api/idea", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "side board widget" }),
+    });
+    expect(added.ok).toBe(true);
+    const right = (await (await fetch("http://127.0.0.1:4441/api/state")).json()) as { ideas: { title: string }[] };
+    const left = (await (await request.get("/api/state")).json()) as { ideas: { title: string }[] };
+    const health = (await (await fetch("http://127.0.0.1:4441/api/health")).json()) as { port: number };
+    expect(health.port).toBe(4441);
+    expect(right.ideas.some((idea) => idea.title === "side board widget")).toBe(true);
+    expect(left.ideas.some((idea) => idea.title === "side board widget")).toBe(false);
+  } finally {
+    child?.kill("SIGTERM");
+  }
+});
+
+test("a torn intake shows a quarantine warning on the board", async ({ page }) => {
+  const dir = mkdtempSync(join(tmpdir(), "foundry-torn-"));
+  writeFileSync(join(dir, "intake.jsonl.torn"), '{"ts":"2026-\n');
+  const child = spawn(process.execPath, ["node_modules/tsx/dist/cli.mjs", "src/server.ts"], {
+    env: {
+      ...process.env,
+      FOUNDRY_DATA: dir,
+      FOUNDRY_PORT: "4442",
+      PORT: "4442",
+      FOUNDRY_OPEN_DRAFTS: "0",
+      FOUNDRY_GITHUB_DRAFT: "offline",
+    },
+  });
+  try {
+    await waitForHealth("http://127.0.0.1:4442/api/health");
+    await page.goto("http://127.0.0.1:4442/");
+    const chip = page.getByTestId("health-quarantine");
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveClass(/warn/);
+    await expect(chip).toContainText("events 0");
+    await expect(chip).toContainText("ideas 0");
+    await expect(chip).toContainText("lessons 0");
+    await expect(chip).toContainText("intake 1");
+    await expect(chip).toContainText("intake.jsonl.torn");
+    const warning = page.getByTestId("health-quarantine-warning");
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText("Quarantined lines");
+    await expect(warning).toContainText("intake 1");
+    await expect(warning).toContainText(join(dir, "intake.jsonl.torn"));
+    const background = await chip.evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(background).not.toBe("rgba(0, 0, 0, 0)");
+  } finally {
+    child.kill("SIGTERM");
+  }
 });

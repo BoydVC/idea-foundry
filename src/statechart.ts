@@ -1,4 +1,5 @@
 import { EVENTS, PHASES, type Edge, type EventName, type Phase } from "./domain.js";
+import { READER_STATE, readerStep } from "../model/statechart-view.js";
 
 const PHASE_SET = new Set<string>(PHASES);
 const EVENT_SET = new Set<string>(EVENTS);
@@ -72,8 +73,13 @@ function collect(event: EventName, body: string, found: Map<string, Edge>): void
 
 export function mermaid(edges: readonly Edge[]): string {
   const lines = ["stateDiagram-v2", "  [*] --> raw"];
+  for (const phase of PHASES) lines.push(`  state "${READER_STATE[phase]}" as ${phase}`);
   const sorted = [...edges].sort((a, b) => `${a.from} ${a.event} ${a.to}`.localeCompare(`${b.from} ${b.event} ${b.to}`));
-  for (const edge of sorted) lines.push(`  ${edge.from} --> ${edge.to}: ${edge.event}`);
+  for (const edge of sorted) {
+    const label = readerStep(edge.event);
+    if (!label) continue;
+    lines.push(`  ${edge.from} --> ${edge.to}: ${label}`);
+  }
   return `${lines.join("\n")}\n`;
 }
 

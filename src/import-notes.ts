@@ -27,6 +27,11 @@ export function draftOf(title: string, note: string): Restatement {
 }
 
 const MAX_NOTE_CHARS = 4_000;
+const MAX_IMPORT_CHARS = 10_000_000;
+
+export function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
 
 function stringField(record: Record<string, unknown>, keys: readonly string[], label: string): string {
   for (const key of keys) {
@@ -53,6 +58,24 @@ function noteFromRow(row: unknown): { title: string; note: string } {
   return { title, note };
 }
 
+function isBareBookmarkExport(rows: unknown[]): boolean {
+  if (rows.length === 0) return false;
+  return rows.every((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+    const record = row as Record<string, unknown>;
+    return typeof record.id === "string" && typeof record.text === "string" && !("title" in record);
+  });
+}
+
+function rejectBareBookmarkExport(rows: unknown[]): void {
+  if (!isBareBookmarkExport(rows)) return;
+  throw new DomainError(
+    "bad_import",
+    "This file is an X bookmark export. Use `foundry import --from <file>`.",
+    "Run `foundry import --from fixtures/x-bookmarks.json`.",
+  );
+}
+
 function fromJson(text: string): { title: string; note: string }[] {
   let parsed: unknown;
   try {
@@ -60,7 +83,10 @@ function fromJson(text: string): { title: string; note: string }[] {
   } catch {
     throw new DomainError("bad_import", "The import file is not valid JSON.", "Fix the JSON, or use markdown headings.");
   }
-  if (Array.isArray(parsed)) return parsed.map(noteFromRow);
+  if (Array.isArray(parsed)) {
+    rejectBareBookmarkExport(parsed);
+    return parsed.map(noteFromRow);
+  }
   if (!parsed || typeof parsed !== "object") {
     throw new DomainError("bad_import", "JSON import needs a notes or bookmarks list.", "Use {\"bookmarks\":[{\"title\",\"note\"}]}.");
   }
@@ -70,6 +96,7 @@ function fromJson(text: string): { title: string; note: string }[] {
   if (notes === null && bookmarks === null) {
     throw new DomainError("bad_import", "JSON import needs a notes or bookmarks list.", "Use {\"bookmarks\":[{\"title\",\"note\"}]}.");
   }
+  if (bookmarks) rejectBareBookmarkExport(bookmarks);
   return [...(notes ?? []), ...(bookmarks ?? [])].map(noteFromRow);
 }
 
@@ -97,10 +124,86 @@ function fromMarkdown(text: string): { title: string; note: string }[] {
   return notes;
 }
 
+export type XBookmark = {
+  id: string;
+  author: string;
+  text: string;
+  date: string;
+};
+
+export type InvalidBookmark = {
+  index: number;
+  id?: string;
+  message: string;
+  next: string;
+};
+
+function rowProblem(index: number, id: string | undefined, message: string, next: string): InvalidBookmark {
+  return { index, id, message: `Row ${index}: ${message}`, next };
+}
+
+function bookmarkRow(row: unknown, index: number): { ok: true; value: XBookmark } | { ok: false; error: InvalidBookmark } {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    return { ok: false, error: rowProblem(index, undefined, "the bookmark must be an object.", "Use {id, author, text, date}.") };
+  }
+  const record = row as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id : undefined;
+  const text = record.text;
+  if (typeof text !== "string" || text.trim() === "") {
+    return { ok: false, error: rowProblem(index, id, "the bookmark needs a text string.", "Add text for that bookmark.") };
+  }
+  if (text.length > 500) {
+    return { ok: false, error: rowProblem(index, id, "the bookmark text is too long.", "Keep the text under 500 characters.") };
+  }
+  if (typeof record.id !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(record.id)) {
+    return { ok: false, error: rowProblem(index, id, "the bookmark needs an id.", "Use a short id such as bk-habit.") };
+  }
+  if (typeof record.author !== "string" || record.author.trim() === "" || record.author.length > 80) {
+    return { ok: false, error: rowProblem(index, record.id, "the bookmark needs an author string.", "Use a synthetic author label.") };
+  }
+  if (typeof record.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) {
+    return { ok: false, error: rowProblem(index, record.id, "the bookmark needs a YYYY-MM-DD date.", "Use a synthetic date such as 2026-10-20.") };
+  }
+  return {
+    ok: true,
+    value: { id: record.id, author: record.author.trim(), text: text.replace(/\s+/g, " ").trim(), date: record.date },
+  };
+}
+
+export function parseBookmarkExport(text: string): { rows: (XBookmark & { index: number })[]; invalid: InvalidBookmark[] } {
+  const trimmed = stripBom(text).trim();
+  if (trimmed.length === 0) return { rows: [], invalid: [] };
+  if (trimmed.length > MAX_IMPORT_CHARS) {
+    throw new DomainError("bad_import", "The import file is too large.", "Split the file and import the pieces.");
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(trimmed);
+  } catch {
+    throw new DomainError("bad_import", "The bookmark export is not valid JSON.", "Pass a JSON file of {id, author, text, date} rows.");
+  }
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && Array.isArray((payload as { bookmarks?: unknown }).bookmarks)
+      ? (payload as { bookmarks: unknown[] }).bookmarks
+      : null;
+  if (!rows) {
+    throw new DomainError("bad_import", "The bookmark export needs a list of {id, author, text, date}.", "Use fixtures/x-bookmarks.json as the shape.");
+  }
+  const kept: (XBookmark & { index: number })[] = [];
+  const invalid: InvalidBookmark[] = [];
+  rows.forEach((row, offset) => {
+    const result = bookmarkRow(row, offset + 1);
+    if (result.ok) kept.push({ ...result.value, index: offset + 1 });
+    else invalid.push(result.error);
+  });
+  return { rows: kept, invalid };
+}
+
 export function parseImportFile(text: string): ImportNote[] {
-  const trimmed = text.trim();
+  const trimmed = stripBom(text).trim();
   if (trimmed.length === 0) return [];
-  if (trimmed.length > 256_000) {
+  if (trimmed.length > MAX_IMPORT_CHARS) {
     throw new DomainError("bad_import", "The import file is too large.", "Split the file and import the pieces.");
   }
   const raw = trimmed.startsWith("{") || trimmed.startsWith("[") ? jsonOrMarkdown(trimmed) : fromMarkdown(trimmed);

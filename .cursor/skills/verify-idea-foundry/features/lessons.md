@@ -5,6 +5,7 @@ A finding that shows up twice is stored and named as a gate.
 ## Sub-features
 
 - ledger: the lessons list shows a key, a count, and the gate it was promoted to.
+- check: a repeated finding that has no entry in `LESSON_CHECKS` fails the next gate. The dashboard is not the only place the rule lives. `foundry correct` writes a proposal and does not apply it.
 
 ## How to get to it (user POV)
 

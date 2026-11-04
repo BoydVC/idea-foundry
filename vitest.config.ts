@@ -5,5 +5,8 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     testTimeout: 20000,
     hookTimeout: 20000,
+    env: {
+      FOUNDRY_OPEN_DRAFTS: "0",
+    },
   },
 });
