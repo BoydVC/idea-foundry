@@ -25,8 +25,10 @@ const BLOCKED = new Set(["merge", "deploy", "send", "ship", "email", "slack", "p
 type Body = Record<string, unknown>;
 
 function suppliedVersion(body: Body): number | undefined {
-  const raw = typeof body.recordVersion === "number" ? body.recordVersion : body.version;
-  return typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : undefined;
+  if (!("recordVersion" in body) && !("version" in body)) return undefined;
+  const raw = "recordVersion" in body ? body.recordVersion : body.version;
+  if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) return raw;
+  throw new DomainError("bad_version", "Version must be a non-negative integer.", "Re-read the record and send that version.");
 }
 
 function send(res: ServerResponse, status: number, payload: unknown, type = "application/json; charset=utf-8"): void {

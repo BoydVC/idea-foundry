@@ -83,7 +83,10 @@ function applyTlc(gates: GateResult[], tlcOk: boolean): GateResult[] {
 }
 
 function fromThrown(error: unknown): CommandErr {
-  if (error instanceof DomainError) return fail(error instanceof IllegalTransition ? 422 : 400, error.code, error.message, error.next);
+  if (error instanceof DomainError) {
+    const status = error instanceof IllegalTransition || error.code === "stack_order" ? 422 : 400;
+    return fail(status, error.code, error.message, error.next);
+  }
   if (error instanceof Error) return fail(500, "internal", error.message, "Retry the command. If it repeats, reset the data directory.");
   return fail(500, "internal", "Unknown failure.", "Retry the command.");
 }
@@ -536,9 +539,19 @@ function unverify(
   if (dryRun) return ok({ spec: nextSpec, idea: nextIdea, unverified: true }, { dryRun: true, warning: decided.warning });
   const expectIdeas = nextIdea && idea && nextIdea.version !== idea.version ? [{ id: idea.id, version: idea.version }] : [];
   try {
-    const saved = store.transact({ ideas: expectIdeas, specs: [{ id: spec.id, version: spec.version }] }, (current) => {
+    const saved = store.transact(
+      { ideas: expectIdeas, specs: siblings.map((item) => ({ id: item.id, version: item.version })) },
+      (current) => {
       const fresh = current.specs.find((item) => item.id === spec.id);
       if (!fresh || fresh.state !== "verified") return current;
+      const higherNow = current.specs.filter((item) => item.stackId === fresh.stackId && item.index > fresh.index && item.state === "verified");
+      if (higherNow.length > 0) {
+        throw new DomainError(
+          "stack_order",
+          `Un-verify ${higherNow.map((item) => item.id).join(", ")} before ${fresh.id}.`,
+          "Stacks leave verified from the top.",
+        );
+      }
       const written = parseSpec(bump(fresh, { state: transition(fresh.state, "unverify") }, store.now()));
       let ideas = current.ideas;
       const currentIdea = ideas.find((item) => item.id === fresh.ideaId);
@@ -562,6 +575,13 @@ function unverify(
 }
 
 function stackBlock(spec: Spec, specs: readonly Spec[]): CommandErr | null {
+  const unmet = specs
+    .filter((item) => item.id !== spec.id && item.index < spec.index && item.state !== "verified")
+    .sort((a, b) => a.index - b.index);
+  if (unmet.length > 0) {
+    const names = unmet.map((item) => `${item.id} is ${item.state}`).join(", ");
+    return fail(422, "stack_order", `${spec.id} cannot be verified while ${names}.`, `Verify ${unmet[0]?.id ?? "the lower spec"} before ${spec.id}.`);
+  }
   if (spec.landsAfter === null) return null;
   const below = specs.find((item) => item.id === spec.landsAfter);
   if (!below) {
@@ -576,6 +596,10 @@ function stackBlock(spec: Spec, specs: readonly Spec[]): CommandErr | null {
     );
   }
   return null;
+}
+
+function githubStatus(warning: string | undefined): number {
+  return warning !== undefined && /rate limit/i.test(warning) ? 429 : 502;
 }
 
 export function ingest(
@@ -598,9 +622,11 @@ export function ingest(
   const reportDraft = overrides.draft === false || report.draft === false ? false : overrides.draft === true || report.draft;
   const prRaw = overrides.pr ?? report.pr;
   if (spec.state === "verified") {
-    const storedPr = spec.prUrl;
-    const prForCheck = typeof prRaw === "string" && prRaw.length > 0 ? prRaw : storedPr;
-    const decided = resolveDraftStatus(reportDraft, prForCheck, overrides.probe ?? lookupGithubDraft);
+    if (typeof prRaw === "string" && prRaw.length > 0 && prRaw !== spec.prUrl) {
+      return fail(422, "pr_mismatch", `This spec is verified at ${spec.prUrl}.`, "Re-ingest that pull request, not a different URL.");
+    }
+    const decided = resolveDraftStatus(reportDraft, spec.prUrl, overrides.probe ?? lookupGithubDraft);
+    if (decided.withheld) return fail(githubStatus(decided.warning), "github_unavailable", decided.message, decided.next, decided.warning);
     if (decided.draft) return ok(spec, { idempotent: true, dryRun, warning: decided.warning });
     if (decided.warning) return fail(422, "not_draft", decided.message, decided.next, decided.warning);
     return unverify(store, spec, decided, dryRun);
@@ -612,17 +638,28 @@ export function ingest(
     return fail(422, "illegal_transition", `Cannot ingest from ${spec.state}.`, "Run `foundry dispatch <spec-id>` first.");
   }
   const snap = store.load();
-  const siblings = snap.specs.filter((item) => item.stackId === spec.stackId);
+  const earlySiblings = snap.specs.filter((item) => item.stackId === spec.stackId);
   if (report.verdict === "verified") {
-    const blocked = stackBlock(spec, siblings);
-    if (blocked) return blocked;
+    const earlyBlock = stackBlock(spec, earlySiblings);
+    if (earlyBlock) return earlyBlock;
     if (!prRaw) {
       return fail(400, "missing_pr", "A verified ingest needs a pull request URL.", "Pass --pr https://github.com/example-org/demo-board/pull/1.");
     }
   }
   const decided = resolveDraftStatus(reportDraft, typeof prRaw === "string" ? prRaw : undefined, overrides.probe ?? lookupGithubDraft);
+  if (decided.withheld) return fail(githubStatus(decided.warning), "github_unavailable", decided.message, decided.next, decided.warning);
   if (!decided.draft) {
     return fail(422, "not_draft", decided.message, decided.next, decided.warning);
+  }
+  const freshSnap = store.load();
+  const freshSpec = freshSnap.specs.find((item) => item.id === spec.id);
+  if (!freshSpec || freshSpec.state !== "dispatched") {
+    return fail(409, "conflict", "The spec changed before ingest.", "Re-read the spec and retry.");
+  }
+  const siblings = freshSnap.specs.filter((item) => item.stackId === freshSpec.stackId);
+  if (report.verdict === "verified") {
+    const again = stackBlock(freshSpec, siblings);
+    if (again) return again;
   }
   try {
     const pr = typeof prRaw === "string" && prRaw.length > 0 ? prUrl(prRaw) : null;
@@ -647,10 +684,18 @@ export function ingest(
       }
     }
     if (dryRun) return ok({ spec: nextSpec, idea: nextIdea }, { dryRun: true, warning: decided.warning });
-    const expectIdeas = nextIdea && idea && nextIdea.version !== idea.version ? [{ id: idea.id, version: idea.version }] : [];
-    const saved = store.transact({ ideas: expectIdeas, specs: [{ id: spec.id, version: spec.version }] }, (current) => {
+    const ideaNow = freshSnap.ideas.find((item) => item.id === freshSpec.ideaId);
+    const expectIdeas = nextIdea && ideaNow && nextIdea.version !== ideaNow.version ? [{ id: ideaNow.id, version: ideaNow.version }] : [];
+    const saved = store.transact(
+      { ideas: expectIdeas, specs: siblings.map((item) => ({ id: item.id, version: item.version })) },
+      (current) => {
       const fresh = current.specs.find((item) => item.id === spec.id);
       if (!fresh || fresh.state !== "dispatched") return current;
+      if (report.verdict === "verified") {
+        const family = current.specs.filter((item) => item.stackId === fresh.stackId);
+        const blockedNow = stackBlock(fresh, family);
+        if (blockedNow) throw new DomainError("stack_order", blockedNow.message, blockedNow.next);
+      }
       const written =
         report.verdict === "rejected"
           ? parseSpec(bump(fresh, { state: transition(fresh.state, "reject"), reason: report.body || "Rejected by the report." }, store.now()))

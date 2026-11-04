@@ -9,6 +9,7 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
   appendFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -301,28 +302,62 @@ export class Store {
     return join(dirname(fileURLToPath(import.meta.url)), "../model");
   }
 
+  private releaseLock(lockPath: string, token: string): void {
+    try {
+      if (readFileSync(lockPath, "utf8") !== token) return;
+      unlinkSync(lockPath);
+    } catch {
+      /* already gone */
+    }
+  }
+
+  private lockIsLive(lockPath: string): boolean {
+    let text: string;
+    try {
+      text = readFileSync(lockPath, "utf8");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return false;
+      throw error;
+    }
+    const pid = Number(text.split(" ")[0]);
+    if (!Number.isInteger(pid) || pid <= 0) {
+      try {
+        return Date.now() - statSync(lockPath).mtimeMs < 5000;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return false;
+        throw error;
+      }
+    }
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return code === "EPERM";
+    }
+  }
+
   private withLock<T>(body: () => T): T {
     mkdirSync(this.root, { recursive: true });
     const lockPath = join(this.root, "state.lock");
+    const token = `${process.pid} ${Date.now()} ${Math.random()}`;
     const started = Date.now();
     for (;;) {
       try {
         const fd = openSync(lockPath, "wx");
         try {
+          writeSync(fd, token);
           return body();
         } finally {
           closeSync(fd);
-          try {
-            unlinkSync(lockPath);
-          } catch {
-            /* raced */
-          }
+          this.releaseLock(lockPath, token);
         }
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== "EEXIST") throw error;
-        const age = Date.now() - statSync(lockPath).mtimeMs;
-        if (age > 5000) {
+        if (!this.lockIsLive(lockPath)) {
           try {
             unlinkSync(lockPath);
           } catch {

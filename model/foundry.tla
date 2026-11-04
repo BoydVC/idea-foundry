@@ -104,14 +104,16 @@ Unverify1 ==
   /\ s2 # "verified"
   /\ s1' = "dispatched"
   /\ draft1' = FALSE
-  /\ UNCHANGED <<idea, s2, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
+  /\ idea' = IF idea = "verified" THEN "gated" ELSE idea
+  /\ UNCHANGED <<s2, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
 
 \* event: unverify
 Unverify2 ==
   /\ s2 = "verified"
   /\ s2' = "dispatched"
   /\ draft2' = FALSE
-  /\ UNCHANGED <<idea, s1, draft1, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
+  /\ idea' = IF idea = "verified" THEN "gated" ELSE idea
+  /\ UNCHANGED <<s1, draft1, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
 
 \* A new draft pull request restores the flag. Not a chart edge.
 Redraft1 ==
@@ -145,6 +147,22 @@ GateFail1 ==
   /\ draft1' = FALSE
   /\ g1' = FALSE
   /\ UNCHANGED <<idea, s2, draft2, g2, stored, commits, aRead, bRead, aDone, bDone>>
+
+\* event: gate_fail
+GateFail2 ==
+  /\ s2 = "gated"
+  /\ s2' = "specced"
+  /\ draft2' = FALSE
+  /\ g2' = FALSE
+  /\ UNCHANGED <<idea, s1, draft1, g1, stored, commits, aRead, bRead, aDone, bDone>>
+
+\* event: gate_fail
+FailIdea ==
+  /\ idea = "gated"
+  /\ \/ s1 \in {"specced", "rejected", "parked", "absent"}
+     \/ s2 \in {"specced", "rejected", "parked", "absent"}
+  /\ idea' = "specced"
+  /\ UNCHANGED <<s1, s2, draft1, draft2, g1, g2, stored, commits, aRead, bRead, aDone, bDone>>
 
 \* event: close
 Close ==
@@ -294,6 +312,8 @@ Next ==
   \/ Reject1
   \/ Reject2
   \/ GateFail1
+  \/ GateFail2
+  \/ FailIdea
   \/ Close
   \/ ReopenIdea
   \/ ParkRaw
@@ -355,5 +375,7 @@ CASNoLostUpdate ==
 DispatchRequiresGate ==
   /\ (s1 \in {"dispatched", "verified", "rejected"} => g1)
   /\ (s2 \in {"dispatched", "verified", "rejected"} => g2)
+
+VerifiedIdeaNeedsSpecs == idea = "verified" => (s1 = "verified" /\ s2 = "verified")
 
 =============================================================================

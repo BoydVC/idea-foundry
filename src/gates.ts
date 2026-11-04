@@ -1,8 +1,39 @@
+import { posix } from "node:path";
 import type { Finding, GateResult, Spec, SpecId } from "./domain.js";
 
 const VAGUE = /\b(improve|enhance|optimize|leverage|streamline|handle|manage)\b/i;
 const RUNNABLE = /^(node|npm|npx|tsc)(\s+\S+)+$/;
+const SHELL = /[;&|`$<>(){}!\n\r]/;
 const MERGE_ORDER = /\byou may merge\b|\bauto-merge\b|\bmerge the pull request\b/i;
+
+export function canonicalTouch(file: string): string | null {
+  if (file.length === 0 || file.includes("\0")) return null;
+  const slashed = file.replace(/\\/g, "/").normalize("NFKC");
+  if (/^[A-Za-z]:/.test(slashed) || slashed.startsWith("//")) return null;
+  let decoded = slashed;
+  for (let pass = 0; pass < 3; pass += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next.normalize("NFKC");
+    } catch {
+      return null;
+    }
+  }
+  if (decoded.includes("\0")) return null;
+  const normalized = posix.normalize(decoded);
+  if (
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.startsWith("/") ||
+    posix.isAbsolute(normalized) ||
+    normalized.split("/").includes("..")
+  ) {
+    return null;
+  }
+  const trimmed = normalized.replace(/\/+$/, "");
+  return trimmed.length > 0 ? trimmed : null;
+}
 
 function result(gate: GateResult["gate"], findings: Finding[]): GateResult {
   return { gate, pass: findings.length === 0, findings };
@@ -10,16 +41,17 @@ function result(gate: GateResult["gate"], findings: Finding[]): GateResult {
 
 export function checkG1(spec: Pick<Spec, "acceptance" | "touch" | "maxLines">): GateResult {
   const findings: Finding[] = [];
-  if (!spec.acceptance.some((command) => RUNNABLE.test(command))) {
+  const runnable = spec.acceptance.some((command) => RUNNABLE.test(command) && !SHELL.test(command));
+  if (!runnable || spec.acceptance.some((command) => SHELL.test(command))) {
     findings.push({
       key: "g1:acceptance",
-      detail: "Add an acceptance command that starts with node, npm, npx, or tsc.",
+      detail: "Add one acceptance command that starts with node, npm, npx, or tsc and does not chain a shell.",
     });
   }
   if (spec.touch.length === 0) {
     findings.push({ key: "g1:touch", detail: "Add a touch map of the files this spec may change." });
   }
-  if (spec.touch.some((path) => path.startsWith("/") || path.includes(".."))) {
+  if (spec.touch.some((path) => canonicalTouch(path) === null)) {
     findings.push({ key: "g1:touch-escape", detail: "Keep every touch path inside the repo." });
   }
   if (spec.maxLines > 400) {
@@ -75,11 +107,17 @@ export function sharedTouchFindings(
   siblings: readonly { id: string; touch: readonly string[] }[],
 ): Finding[] {
   const findings: Finding[] = [];
+  const seen = new Set<string>();
   for (const file of spec.touch) {
+    const canon = canonicalTouch(file);
+    if (canon === null) continue;
     for (const other of siblings) {
       if (other.id === spec.id) continue;
-      if (!other.touch.includes(file)) continue;
-      findings.push({ key: "g1:blast", detail: `${file} is also touched by ${other.id}.` });
+      if (!other.touch.some((item) => canonicalTouch(item) === canon)) continue;
+      const detail = `${canon} is also touched by ${other.id}.`;
+      if (seen.has(detail)) continue;
+      seen.add(detail);
+      findings.push({ key: "g1:blast", detail });
     }
   }
   return findings;
